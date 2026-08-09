@@ -16,7 +16,13 @@ class ApiException implements Exception {
 }
 
 class MarketApi {
-  static const _baseUrl = 'http://localhost:8787';
+  // Yerelde `flutter run` varsayılan olarak localhost:8787'yi kullanır.
+  // Dağıtım build'inde `--dart-define=API_BASE_URL=https://...` ile
+  // barındırılan proxy_server adresi verilir (bkz. .github/workflows).
+  static const _baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://localhost:8787',
+  );
 
   Future<List<MarketSymbol>> search(String query) async {
     final uri = Uri.parse('$_baseUrl/api/search')

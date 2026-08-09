@@ -1,0 +1,12 @@
+# Render.com Blueprint: proxy_server'ı ücretsiz bir web servisi olarak
+# dağıtır. Render dashboard'da "New +" > "Blueprint" ile bu repo
+# seçildiğinde otomatik algılanır.
+services:
+  - type: web
+    name: borsa-proxy
+    runtime: docker
+    plan: free
+    dockerfilePath: ./proxy_server/Dockerfile
+    dockerContext: ./proxy_server
+    healthCheckPath: /api/watchlist
+    autoDeploy: true
