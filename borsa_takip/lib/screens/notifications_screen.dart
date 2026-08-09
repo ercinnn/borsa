@@ -12,7 +12,8 @@ class NotificationsScreen extends StatefulWidget {
   State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
-class _NotificationsScreenState extends State<NotificationsScreen> {
+class _NotificationsScreenState extends State<NotificationsScreen>
+    with SingleTickerProviderStateMixin {
   final _api = MarketApi();
 
   List<String> _watchlist = [];
@@ -25,11 +26,45 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   String? _bulkAddingPreset;
   String? _error;
 
+  late final TabController _categoryTabController;
+
+  // BIST sembolleri ".IS", kripto sembolleri "-USD" ile bitiyor (bkz.
+  // preset_lists.dart / coingecko_client.dart); geri kalan her şey ABD/diğer
+  // sekmesinde toplanıyor.
+  List<String> get _bistSymbols =>
+      _watchlist.where((s) => s.endsWith('.IS')).toList();
+  List<String> get _cryptoSymbols =>
+      _watchlist.where((s) => s.endsWith('-USD')).toList();
+  List<String> get _usSymbols => _watchlist
+      .where((s) => !s.endsWith('.IS') && !s.endsWith('-USD'))
+      .toList();
+
+  List<String> get _currentCategorySymbols {
+    switch (_categoryTabController.index) {
+      case 0:
+        return _bistSymbols;
+      case 1:
+        return _usSymbols;
+      default:
+        return _cryptoSymbols;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _categoryTabController = TabController(length: 3, vsync: this)
+      ..addListener(() {
+        if (mounted) setState(() {});
+      });
     _loadWatchlist();
     _loadNotifications();
+  }
+
+  @override
+  void dispose() {
+    _categoryTabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadWatchlist() async {
@@ -194,11 +229,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             Text('${_watchlist.length} sembol izleniyor',
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: Theme.of(context).dividerColor),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: TabBar(
+                controller: _categoryTabController,
+                tabs: [
+                  Tab(text: 'BIST (${_bistSymbols.length})'),
+                  Tab(text: 'ABD (${_usSymbols.length})'),
+                  Tab(text: 'Kripto (${_cryptoSymbols.length})'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final s in _watchlist)
+                for (final s in _currentCategorySymbols)
                   Chip(
                     label: Text(s),
                     onDeleted: () => _removeSymbol(s),
