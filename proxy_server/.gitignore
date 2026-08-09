@@ -1,0 +1,6 @@
+.dart_tool/
+.packages
+build/
+
+# Çalışma zamanında oluşan izleme listesi ve bildirim verileri
+data/
