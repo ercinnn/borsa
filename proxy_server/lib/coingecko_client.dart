@@ -2,10 +2,30 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'yahoo_client.dart' show userAgent;
+
+// CoinGecko'nun anahtar gerektirmeyen ücretsiz ucu IP başına sıkı rate limit
+// uyguluyor; özellikle Render gibi paylaşımlı bulut IP'lerinden 429 sık
+// görülüyor. Sonucu bir süre önbelleğe alıp 429'da kısaca bekleyip yeniden
+// deneyerek ve son başarılı sonuca düşerek dayanıklılığı artırıyoruz.
+const _cacheTtl = Duration(hours: 1);
+
+List<String>? _cachedSymbols;
+int? _cachedCount;
+DateTime? _cachedAt;
+
 /// CoinGecko'nun ücretsiz, anahtar gerektirmeyen piyasa verisi ucundan
 /// piyasa değerine göre ilk [count] kriptoyu çekip Yahoo Finance uyumlu
 /// "SEMBOL-USD" formatında döndürür.
 Future<List<String>> fetchTopCryptoSymbols(http.Client client, int count) async {
+  final now = DateTime.now();
+  if (_cachedSymbols != null &&
+      _cachedCount == count &&
+      _cachedAt != null &&
+      now.difference(_cachedAt!) < _cacheTtl) {
+    return _cachedSymbols!;
+  }
+
   final uri = Uri.https('api.coingecko.com', '/api/v3/coins/markets', {
     'vs_currency': 'usd',
     'order': 'market_cap_desc',
@@ -14,8 +34,14 @@ Future<List<String>> fetchTopCryptoSymbols(http.Client client, int count) async 
     'sparkline': 'false',
   });
 
-  final resp = await client.get(uri);
+  var resp = await client.get(uri, headers: {'User-Agent': userAgent});
+  if (resp.statusCode == 429) {
+    await Future.delayed(const Duration(seconds: 5));
+    resp = await client.get(uri, headers: {'User-Agent': userAgent});
+  }
+
   if (resp.statusCode != 200) {
+    if (_cachedSymbols != null) return _cachedSymbols!;
     throw Exception('CoinGecko isteği başarısız (${resp.statusCode})');
   }
 
@@ -26,5 +52,10 @@ Future<List<String>> fetchTopCryptoSymbols(http.Client client, int count) async 
     if (symbol == null || symbol.trim().isEmpty) continue;
     symbols.add('${symbol.trim().toUpperCase()}-USD');
   }
-  return symbols.toList();
+
+  final result = symbols.toList();
+  _cachedSymbols = result;
+  _cachedCount = count;
+  _cachedAt = now;
+  return result;
 }
