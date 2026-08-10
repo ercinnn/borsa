@@ -82,6 +82,38 @@ class MarketApi {
     return resp['added'] as int;
   }
 
+  Future<List<String>> getFavorites() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/favorites'));
+    return (resp['symbols'] as List).cast<String>();
+  }
+
+  Future<List<String>> addToFavorites(String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/favorites/add'),
+      {'symbol': symbol},
+    );
+    return (resp['symbols'] as List).cast<String>();
+  }
+
+  Future<List<String>> removeFromFavorites(String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/favorites/remove'),
+      {'symbol': symbol},
+    );
+    return (resp['symbols'] as List).cast<String>();
+  }
+
+  /// Takip sekmesinde gösterilen, kullanıcı başına kalıcı olarak saklanan
+  /// aktif sembol. Hiç ayarlanmadıysa null döner.
+  Future<String?> getTrackedSymbol() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/tracked'));
+    return resp['symbol'] as String?;
+  }
+
+  Future<void> setTrackedSymbol(String symbol) async {
+    await _post(Uri.parse('$_baseUrl/api/tracked'), {'symbol': symbol});
+  }
+
   /// [category]: 'bist', 'us' veya 'crypto'; verilmezse tüm bildirimler.
   Future<NotificationPage> getNotifications({int page = 1, String? category}) async {
     final uri = Uri.parse('$_baseUrl/api/notifications').replace(

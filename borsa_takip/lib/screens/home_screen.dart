@@ -17,8 +17,14 @@ class HomeScreen extends StatefulWidget {
   // anlayıp otomatik grafiği getirebiliyor.
   final MarketSymbol? requestedSymbol;
   final int requestId;
+  final List<String> favorites;
 
-  const HomeScreen({super.key, this.requestedSymbol, this.requestId = 0});
+  const HomeScreen({
+    super.key,
+    this.requestedSymbol,
+    this.requestId = 0,
+    this.favorites = const [],
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -138,6 +144,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Text('Favoriler', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           FavoriteSymbolsBar(
+            symbols: [
+              for (final s in widget.favorites) MarketSymbol(symbol: s, name: s),
+            ],
             selected: _selectedSymbol,
             onSelect: _selectSymbol,
           ),
@@ -150,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final interval in ChartInterval.values)
+              for (final interval in ChartInterval.longTerm)
                 ChoiceChip(
                   label: Text(interval.label),
                   selected: _interval == interval,

@@ -2,20 +2,38 @@ import 'package:flutter/material.dart';
 
 import '../models/candle.dart';
 
-class CandlestickChart extends StatelessWidget {
+class CandlestickChart extends StatefulWidget {
   final CandleResult result;
 
   const CandlestickChart({super.key, required this.result});
 
+  @override
+  State<CandlestickChart> createState() => _CandlestickChartState();
+}
+
+class _CandlestickChartState extends State<CandlestickChart> {
   static const _chartHeight = 260.0;
   static const _labelHeight = 28.0;
   static const _axisWidth = 64.0;
   static const _minSlotWidth = 1.5;
   static const _maxSlotWidth = 46.0;
+  static const _popupWidth = 148.0;
+
+  int? _selectedIndex;
+
+  @override
+  void didUpdateWidget(covariant CandlestickChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Yeni sembol/aralık verisi geldiğinde eski mumun popup'ı anlamsız
+    // kalacağından kapatılıyor.
+    if (oldWidget.result != widget.result) {
+      _selectedIndex = null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final candles = result.candles;
+    final candles = widget.result.candles;
     if (candles.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -33,7 +51,7 @@ class CandlestickChart extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${result.symbol} · Mum Grafik',
+              '${widget.result.symbol} · Mum Grafik',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -55,6 +73,11 @@ class CandlestickChart extends StatelessWidget {
                               .clamp(_minSlotWidth, _maxSlotWidth);
                       final candleWidth = (slotWidth * 0.7).clamp(1.0, 20.0);
                       final contentWidth = slotWidth * candles.length;
+                      // Dar mum aralıklarında her mumun altına etiket
+                      // sığmayacağından, etiketler ve dikey referans
+                      // çizgileri ~60px'lik gruplar halinde birleştiriliyor.
+                      final labelEvery =
+                          (60 / slotWidth).ceil().clamp(1, candles.length);
 
                       return SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
@@ -64,15 +87,47 @@ class CandlestickChart extends StatelessWidget {
                             children: [
                               SizedBox(
                                 height: _chartHeight,
-                                child: CustomPaint(
-                                  painter: _CandlestickPainter(
-                                    candles: candles,
-                                    minPrice: minPrice,
-                                    maxPrice: maxPrice,
-                                    slotWidth: slotWidth,
-                                    candleWidth: candleWidth,
-                                  ),
-                                  size: Size(contentWidth, _chartHeight),
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTapUp: (details) {
+                                        final idx =
+                                            (details.localPosition.dx / slotWidth)
+                                                .floor()
+                                                .clamp(0, candles.length - 1);
+                                        setState(() {
+                                          _selectedIndex = idx;
+                                        });
+                                      },
+                                      child: CustomPaint(
+                                        painter: _CandlestickPainter(
+                                          candles: candles,
+                                          minPrice: minPrice,
+                                          maxPrice: maxPrice,
+                                          slotWidth: slotWidth,
+                                          candleWidth: candleWidth,
+                                          labelEvery: labelEvery,
+                                        ),
+                                        size: Size(contentWidth, _chartHeight),
+                                      ),
+                                    ),
+                                    if (_selectedIndex != null)
+                                      _CandleInfoPopup(
+                                        candle: candles[_selectedIndex!],
+                                        left: ((_selectedIndex! + 0.5) * slotWidth -
+                                                _popupWidth / 2)
+                                            .clamp(
+                                          0.0,
+                                          (contentWidth - _popupWidth)
+                                              .clamp(0.0, double.infinity),
+                                        ),
+                                        width: _popupWidth,
+                                        onClose: () =>
+                                            setState(() => _selectedIndex = null),
+                                      ),
+                                  ],
                                 ),
                               ),
                               SizedBox(
@@ -80,6 +135,7 @@ class CandlestickChart extends StatelessWidget {
                                 child: _PeriodLabels(
                                   candles: candles,
                                   slotWidth: slotWidth,
+                                  labelEvery: labelEvery,
                                 ),
                               ),
                             ],
@@ -98,17 +154,75 @@ class CandlestickChart extends StatelessWidget {
   }
 }
 
-class _PeriodLabels extends StatelessWidget {
-  final List<Candle> candles;
-  final double slotWidth;
+class _CandleInfoPopup extends StatelessWidget {
+  final Candle candle;
+  final double left;
+  final double width;
+  final VoidCallback onClose;
 
-  const _PeriodLabels({required this.candles, required this.slotWidth});
+  const _CandleInfoPopup({
+    required this.candle,
+    required this.left,
+    required this.width,
+    required this.onClose,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // Dar mum aralıklarında her mumun altına etiket sığmayacağından,
-    // etiketler yaklaşık 60px'lik gruplar halinde birleştirilip gösteriliyor.
-    final labelEvery = (60 / slotWidth).ceil().clamp(1, candles.length);
+    return Positioned(
+      left: left,
+      top: 4,
+      width: width,
+      child: Card(
+        elevation: 4,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      candle.period,
+                      style: const TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onClose,
+                    child: const Icon(Icons.close, size: 14),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('Yüksek: ${candle.high.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF1B8A5A))),
+              Text('Düşük: ${candle.low.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFFC62828))),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PeriodLabels extends StatelessWidget {
+  final List<Candle> candles;
+  final double slotWidth;
+  final int labelEvery;
+
+  const _PeriodLabels({
+    required this.candles,
+    required this.slotWidth,
+    required this.labelEvery,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     final cells = <Widget>[];
     var i = 0;
     while (i < candles.length) {
@@ -165,6 +279,7 @@ class _CandlestickPainter extends CustomPainter {
   final double maxPrice;
   final double slotWidth;
   final double candleWidth;
+  final int labelEvery;
 
   _CandlestickPainter({
     required this.candles,
@@ -172,6 +287,7 @@ class _CandlestickPainter extends CustomPainter {
     required this.maxPrice,
     required this.slotWidth,
     required this.candleWidth,
+    required this.labelEvery,
   });
 
   double _priceToY(double price, double height) {
@@ -188,6 +304,16 @@ class _CandlestickPainter extends CustomPainter {
     for (var i = 0; i <= 4; i++) {
       final y = size.height * i / 4;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    // _PeriodLabels ile aynı grup sınırlarında, o tarihe denk gelen ince
+    // dikey referans çizgileri.
+    final dateGridPaint = Paint()
+      ..color = Colors.grey.withValues(alpha: 0.18)
+      ..strokeWidth = 1;
+    for (var i = 0; i < candles.length; i += labelEvery) {
+      final x = i * slotWidth;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), dateGridPaint);
     }
 
     final wickWidth = slotWidth < 4 ? 1.0 : 2.0;
@@ -224,6 +350,7 @@ class _CandlestickPainter extends CustomPainter {
     return oldDelegate.candles != candles ||
         oldDelegate.minPrice != minPrice ||
         oldDelegate.maxPrice != maxPrice ||
-        oldDelegate.slotWidth != slotWidth;
+        oldDelegate.slotWidth != slotWidth ||
+        oldDelegate.labelEvery != labelEvery;
   }
 }

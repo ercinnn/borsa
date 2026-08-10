@@ -7,8 +7,15 @@ import '../widgets/symbol_search_field.dart';
 
 class NotificationsScreen extends StatefulWidget {
   final ValueChanged<MarketSymbol>? onOpenChart;
+  final List<String> favorites;
+  final ValueChanged<String>? onToggleFavorite;
 
-  const NotificationsScreen({super.key, this.onOpenChart});
+  const NotificationsScreen({
+    super.key,
+    this.onOpenChart,
+    this.favorites = const [],
+    this.onToggleFavorite,
+  });
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -266,9 +273,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               runSpacing: 8,
               children: [
                 for (final s in _currentCategorySymbols)
-                  Chip(
-                    label: Text(s),
-                    onDeleted: () => _removeSymbol(s),
+                  _WatchlistSymbolChip(
+                    symbol: s,
+                    isFavorite: widget.favorites.contains(s),
+                    onToggleFavorite: widget.onToggleFavorite == null
+                        ? null
+                        : () => widget.onToggleFavorite!(s),
+                    onRemove: () => _removeSymbol(s),
                   ),
               ],
             ),
@@ -361,6 +372,57 @@ class _PresetButton extends StatelessWidget {
             )
           : const Icon(Icons.playlist_add, size: 18),
       label: Text(label),
+    );
+  }
+}
+
+class _WatchlistSymbolChip extends StatelessWidget {
+  final String symbol;
+  final bool isFavorite;
+  final VoidCallback? onToggleFavorite;
+  final VoidCallback onRemove;
+
+  const _WatchlistSymbolChip({
+    required this.symbol,
+    required this.isFavorite,
+    required this.onToggleFavorite,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(left: 12, right: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(symbol),
+          IconButton(
+            icon: Icon(
+              isFavorite ? Icons.star : Icons.star_border,
+              size: 18,
+              color: isFavorite ? Colors.amber : Colors.grey,
+            ),
+            onPressed: onToggleFavorite,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            visualDensity: VisualDensity.compact,
+            tooltip: isFavorite ? 'Favorilerden çıkar' : 'Favorilere ekle',
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            onPressed: onRemove,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            visualDensity: VisualDensity.compact,
+            tooltip: 'İzleme listesinden çıkar',
+          ),
+        ],
+      ),
     );
   }
 }

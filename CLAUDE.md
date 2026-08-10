@@ -105,17 +105,28 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   Yahoo's `/v8/finance/chart/{symbol}` endpoint and parses OHLC candles.
   Both `/api/candles` and the monthly-low checker call it — don't duplicate
   Yahoo-parsing logic elsewhere.
-- `store.dart` — `WatchlistStore` and `NotificationStore`, persisted in a
-  Supabase Postgres project via `supabase_client.dart` (a minimal PostgREST
-  wrapper, not the official SDK). Multi-tenant: every method takes a
-  `userId` and queries Supabase filtered to that user (no in-memory cache —
-  a single-user leftover from the pre-auth era, removed once data became
-  per-user). `symbolsFor(userId)` seeds a user's watchlist with 8 default
-  symbols the first time it's empty. `WatchlistStore.allRows()` returns
-  every user's `(user_id, symbol)` pairs for the background checker.
+- `store.dart` — `WatchlistStore`, `NotificationStore`, `FavoritesStore`,
+  `TrackedSymbolStore`, all persisted in a Supabase Postgres project via
+  `supabase_client.dart` (a minimal PostgREST wrapper, not the official
+  SDK). Multi-tenant: every method takes a `userId` and queries Supabase
+  filtered to that user (no in-memory cache — a single-user leftover from
+  the pre-auth era, removed once data became per-user). `symbolsFor(userId)`
+  seeds a user's watchlist with 8 default symbols the first time it's
+  empty; `FavoritesStore` does **not** seed defaults (empty until the user
+  adds some). `WatchlistStore.allRows()` returns every user's
+  `(user_id, symbol)` pairs for the background checker. `FavoritesStore` is
+  a deliberately separate concept from `WatchlistStore` — the watchlist
+  drives the daily monthly-low notification checker, favorites are just a
+  personal shortlist (Favoriler tab, the Grafik tab's quick-select bar, and
+  the star toggle next to each watchlist symbol in Bildirimler); a symbol
+  can be in either, both, or neither. `TrackedSymbolStore` holds one row per
+  user (upserted, no history) for whichever symbol the Takip tab is
+  currently showing.
   Table schema: `proxy_server/supabase_schema.sql` +
-  `supabase_schema_auth.sql` (run once each, in order, in the Supabase SQL
-  Editor — the second adds `user_id` and RLS). Requires `SUPABASE_URL` and
+  `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` (run once
+  each, in order, in the Supabase SQL Editor — the second adds `user_id`
+  and RLS to the base tables, the third adds the `favorites` and
+  `tracked_symbol` tables). Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -152,14 +163,20 @@ minutes before failing it.
 
 Key endpoints (all under `/api/`, CORS-open, JSON in/out):
 `search`, `candles` (params: `symbol,start,end,interval` where interval is
-one of `1d/1wk/1mo/3mo/12mo` — `12mo` doesn't exist in Yahoo and is
-synthesized server-side by grouping `1mo` candles in chunks of 12),
-`watchlist` (GET/add/remove/bulk-add), `notifications` (paginated, 100/page,
-newest first), `notifications/check-now` (fire-and-forget — does NOT await
-the full scan, since a large watchlist can take minutes; guarded by a
-module-level `_checkInProgress` flag against overlapping runs). All
-`watchlist*`/`notifications*` endpoints require `Authorization: Bearer
-<token>` (see Auth above); `search`/`candles`/`health` don't.
+one of `60m/4h/1d/1wk/1mo/3mo/12mo` — `12mo` and `4h` don't exist in Yahoo
+and are synthesized server-side: `12mo` by grouping `1mo` candles in fixed
+chunks of 12, `4h` by fetching `60m` candles and grouping by wall-clock
+4-hour UTC buckets, *not* positional chunking, since intraday data has
+trading-hour/weekend gaps that fixed-size chunks would straddle),
+`watchlist` (GET/add/remove/bulk-add), `favorites` (GET/add/remove, same
+shape as `watchlist`), `tracked` (GET returns `{symbol}` or `{symbol:
+null}`, POST upserts it — backs the Takip tab), `notifications` (paginated,
+100/page, newest first), `notifications/check-now` (fire-and-forget — does
+NOT await the full scan, since a large watchlist can take minutes; guarded
+by a module-level `_checkInProgress` flag against overlapping runs). All
+`watchlist*`/`favorites*`/`tracked`/`notifications*` endpoints require
+`Authorization: Bearer <token>` (see Auth above); `search`/`candles`/
+`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
 `Timer.periodic(Duration(hours: 24))` — this only fires while the process
@@ -170,12 +187,31 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of two independent tab screens behind a bottom
-`NavigationBar`: `HomeScreen` (chart/table) and `NotificationsScreen`
-(watchlist management + notification feed). They don't share state beyond
-both owning their own `MarketApi()` instance. `services/supabase_config.dart`
-holds the (non-secret) Supabase URL + anon/publishable key, hardcoded as
-`String.fromEnvironment` defaults — same pattern as `API_BASE_URL`.
+`IndexedStack` of four tab screens behind a bottom `NavigationBar`:
+`HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
+notification feed), `FavoritesScreen` (search + favorite list), and
+`TrackingScreen` (single-symbol intraday chart). Screens mostly own their
+own `MarketApi()` instance and don't share state — except favorites:
+`RootShell` owns the one `List<String> _favorites` and passes it plus an
+`onToggleFavorite` callback down to `HomeScreen`/`NotificationsScreen`/
+`FavoritesScreen`, so a star toggled in one tab is immediately reflected in
+the others (IndexedStack builds all four tabs eagerly at login, not lazily
+per-visit, so without this lift each tab's own fetch-once-in-initState copy
+would drift out of sync with the others). Two cross-tab navigation flows
+follow the same pattern: tapping a notification switches to Grafik with
+that symbol (`RootShell._openChartFor` → `HomeScreen.requestedSymbol`/
+`requestId`), and tapping the track icon next to a favorite switches to
+Takip with that symbol (`RootShell._openTrackingFor` →
+`TrackingScreen.requestedSymbol`/`requestId`) — in both cases `requestId`
+increments on every tap (even re-tapping the same symbol) because
+`IndexedStack` keeps the target screen's `State` alive, so a plain prop
+change alone wouldn't necessarily be noticed without something for
+`didUpdateWidget` to compare against. `TrackingScreen` additionally loads
+whatever symbol was last persisted via `/api/tracked` on its own `initState`
+(so reopening the app lands back on it without going through Favoriler).
+`services/supabase_config.dart` holds the (non-secret) Supabase URL +
+anon/publishable key, hardcoded as `String.fromEnvironment` defaults — same
+pattern as `API_BASE_URL`.
 
 `services/market_api.dart` is the only HTTP boundary — every screen goes
 through it, never calls `http` directly. Every request attaches
@@ -190,11 +226,28 @@ specific one for "proxy not running").
 ranges) fixed by computing `slotWidth` from `LayoutBuilder`'s
 `constraints.maxWidth / candles.length` (clamped `[1.5, 46]`) so the whole
 range always fits without horizontal scroll, thinning candles as needed
-instead of scrolling.
+instead of scrolling. `CandlestickChart` is `Stateful`: thin vertical
+gridlines are drawn at the same group boundaries as the date-label row
+below the chart (`labelEvery`, computed once and shared by both so they
+stay aligned), and a `GestureDetector` (`onTapUp`, same code path on web
+and mobile — no separate touch/mouse handling needed) maps the tap x
+position to a candle index and shows a small `Positioned` overlay `Card`
+with that candle's high/low next to it; tapping a different candle just
+replaces `_selectedIndex`, which naturally closes the old popup and opens
+the new one since it's a single `int?` in `State`, not a stack of dialogs.
 
-Candle "period" labels (e.g. `Q3 25`, `2024-2025`, `31.07.25`) are formatted
-server-side per interval — the frontend just displays `candle.period`
-as-is, it does no date formatting of its own for chart data.
+Candle "period" labels (e.g. `Q3 25`, `2024-2025`, `31.07.25`, `10.08 14:00`
+for the intraday intervals) are formatted server-side per interval — the
+frontend just displays `candle.period` as-is, it does no date formatting of
+its own for chart data.
+
+`models/interval.dart`'s `ChartInterval` enum covers both long-range
+(`daily`/`weekly`/`monthly`/`quarterly`/`yearly`) and intraday
+(`hourly`/`fourHour`/`daily`) values in one place since `MarketApi.candles`
+needs a single type either way, but no screen shows all seven at once:
+`HomeScreen` renders `ChartInterval.longTerm` chips, `TrackingScreen`
+renders `ChartInterval.intraday` chips — pick whichever list matches when
+adding a new interval rather than iterating `ChartInterval.values`.
 
 ## Deployment
 
@@ -241,3 +294,13 @@ as-is, it does no date formatting of its own for chart data.
 - `git` is not installed on the primary dev machine by default; when it is
   installed via winget mid-session, a *new* shell is needed before `git`
   resolves on PATH (the invoking shell keeps its stale PATH).
+- The `60m`/`4h` intervals' date-range depth isn't validated anywhere —
+  Yahoo itself caps intraday history (roughly the last ~730 days for
+  `60m`), and picking an older start date in the Takip tab's date-range
+  picker just surfaces whatever error Yahoo returns rather than a friendly
+  message.
+- Favorites are only synced across tabs within a single running session
+  (`RootShell._favorites`, lifted so Grafik/Bildirimler/Favoriler agree with
+  each other live) — a second device/tab, or the same app after a full
+  reload, only sees the latest state from its own next `/api/favorites`
+  fetch, not proactively.

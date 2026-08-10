@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/symbol.dart';
+import 'screens/favorites_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'screens/tracking_screen.dart';
+import 'services/market_api.dart';
 import 'services/supabase_config.dart';
 
 Future<void> main() async {
@@ -67,22 +70,75 @@ class RootShell extends StatefulWidget {
 }
 
 class _RootShellState extends State<RootShell> {
+  final _api = MarketApi();
   int _index = 0;
 
-  // Bildirim listesinden bir sembole tıklanınca Grafik sekmesine bu
-  // sembolle geçmek için: sembol aynı olsa bile HomeScreen'in yeniden
-  // tepki vermesi gerektiğinden (didUpdateWidget karşılaştırması için)
-  // her istekte artan bir sayaç da taşınıyor.
+  // Bildirim listesinden bir sembole tıklanınca Grafik sekmesine, Favoriler
+  // listesinden takip ikonuna basılınca Takip sekmesine bu sembolle geçmek
+  // için: sembol aynı olsa bile hedef ekranın yeniden tepki vermesi
+  // gerektiğinden (didUpdateWidget karşılaştırması için) her istekte artan
+  // bir sayaç da taşınıyor.
   MarketSymbol? _chartRequestSymbol;
   int _chartRequestId = 0;
+  MarketSymbol? _trackRequestSymbol;
+  int _trackRequestId = 0;
 
-  static const _titles = ['Grafik ve Aylık En Düşük Değerler', 'Bildirimler'];
+  // Favoriler; Grafik, Bildirimler ve Favoriler sekmeleri aynı listeyi
+  // paylaşıyor (RootShell'de tutulup aşağı aktarılıyor) ki bir sekmede
+  // yapılan favori değişikliği diğerlerinde de görünsün — IndexedStack tüm
+  // sekmeleri en baştan canlı tuttuğundan, her ekranın kendi başına ayrı ayrı
+  // yüklemesi aralarında senkron kalmazdı.
+  List<String> _favorites = [];
+
+  static const _titles = [
+    'Grafik ve Aylık En Düşük Değerler',
+    'Bildirimler',
+    'Favoriler',
+    'Takip',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final list = await _api.getFavorites();
+      if (!mounted) return;
+      setState(() => _favorites = list);
+    } catch (_) {
+      // Sessiz geç: sekmeler favoriler olmadan da açılabilir, kullanıcı
+      // Favoriler sekmesinde tekrar deneyebilir.
+    }
+  }
+
+  Future<void> _toggleFavorite(String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    final isFavorite = _favorites.contains(normalized);
+    try {
+      final updated = isFavorite
+          ? await _api.removeFromFavorites(normalized)
+          : await _api.addToFavorites(normalized);
+      if (!mounted) return;
+      setState(() => _favorites = updated);
+    } catch (_) {}
+  }
 
   void _openChartFor(MarketSymbol symbol) {
     setState(() {
       _chartRequestSymbol = symbol;
       _chartRequestId++;
       _index = 0;
+    });
+  }
+
+  void _openTrackingFor(MarketSymbol symbol) {
+    setState(() {
+      _trackRequestSymbol = symbol;
+      _trackRequestId++;
+      _index = 3;
     });
   }
 
@@ -105,8 +161,22 @@ class _RootShellState extends State<RootShell> {
           HomeScreen(
             requestedSymbol: _chartRequestSymbol,
             requestId: _chartRequestId,
+            favorites: _favorites,
           ),
-          NotificationsScreen(onOpenChart: _openChartFor),
+          NotificationsScreen(
+            onOpenChart: _openChartFor,
+            favorites: _favorites,
+            onToggleFavorite: _toggleFavorite,
+          ),
+          FavoritesScreen(
+            favorites: _favorites,
+            onToggleFavorite: _toggleFavorite,
+            onTrack: _openTrackingFor,
+          ),
+          TrackingScreen(
+            requestedSymbol: _trackRequestSymbol,
+            requestId: _trackRequestId,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -116,6 +186,8 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.show_chart), label: 'Grafik'),
           NavigationDestination(
               icon: Icon(Icons.notifications), label: 'Bildirimler'),
+          NavigationDestination(icon: Icon(Icons.star), label: 'Favoriler'),
+          NavigationDestination(icon: Icon(Icons.insights), label: 'Takip'),
         ],
       ),
     );
