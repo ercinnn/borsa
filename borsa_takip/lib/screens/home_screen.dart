@@ -11,7 +11,14 @@ import '../widgets/favorite_symbols_bar.dart';
 import '../widgets/symbol_search_field.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  // Bildirimler sekmesinden bir sembole tıklanınca RootShell bu ikisini
+  // birlikte günceller: requestId, requestedSymbol aynı sembol için bile
+  // her tıklamada arttığından didUpdateWidget yeni bir istek olduğunu
+  // anlayıp otomatik grafiği getirebiliyor.
+  final MarketSymbol? requestedSymbol;
+  final int requestId;
+
+  const HomeScreen({super.key, this.requestedSymbol, this.requestId = 0});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -29,14 +36,40 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   CandleResult? _result;
 
-  @override
-  void initState() {
-    super.initState();
+  int _handledRequestId = 0;
+
+  static DateTimeRange _last12Months() {
     final now = DateTime.now();
-    _dateRange = DateTimeRange(
+    return DateTimeRange(
       start: DateTime(now.year - 1, now.month, now.day),
       end: now,
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _dateRange = _last12Months();
+    if (widget.requestedSymbol != null) {
+      _handledRequestId = widget.requestId;
+      _selectedSymbol = widget.requestedSymbol;
+      _interval = ChartInterval.monthly;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fetch());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.requestedSymbol == null) return;
+    if (widget.requestId == _handledRequestId) return;
+    _handledRequestId = widget.requestId;
+    setState(() {
+      _selectedSymbol = widget.requestedSymbol;
+      _interval = ChartInterval.monthly;
+      _dateRange = _last12Months();
+    });
+    _fetch();
   }
 
   Future<void> _pickDateRange() async {

@@ -6,7 +6,9 @@ import '../services/market_api.dart';
 import '../widgets/symbol_search_field.dart';
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key});
+  final ValueChanged<MarketSymbol>? onOpenChart;
+
+  const NotificationsScreen({super.key, this.onOpenChart});
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -313,7 +315,15 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               child: Text('Henüz bildirim yok.'),
             )
           else ...[
-            for (final n in _notificationPage!.notifications) _NotificationTile(item: n),
+            for (final n in _notificationPage!.notifications)
+              _NotificationTile(
+                item: n,
+                onTap: widget.onOpenChart == null
+                    ? null
+                    : () => widget.onOpenChart!(
+                          MarketSymbol(symbol: n.symbol, name: n.symbol),
+                        ),
+              ),
             const SizedBox(height: 12),
             _Pagination(
               page: _notificationPage!.page,
@@ -357,8 +367,9 @@ class _PresetButton extends StatelessWidget {
 
 class _NotificationTile extends StatelessWidget {
   final NotificationItem item;
+  final VoidCallback? onTap;
 
-  const _NotificationTile({required this.item});
+  const _NotificationTile({required this.item, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -368,6 +379,8 @@ class _NotificationTile extends StatelessWidget {
         leading: const Icon(Icons.trending_down),
         title: Text(item.message),
         subtitle: Text('${item.date} · ${item.createdAt}'),
+        trailing: onTap == null ? null : const Icon(Icons.chevron_right),
+        onTap: onTap,
       ),
     );
   }

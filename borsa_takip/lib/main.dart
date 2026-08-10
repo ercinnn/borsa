@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'models/symbol.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
@@ -68,7 +69,22 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell> {
   int _index = 0;
 
+  // Bildirim listesinden bir sembole tıklanınca Grafik sekmesine bu
+  // sembolle geçmek için: sembol aynı olsa bile HomeScreen'in yeniden
+  // tepki vermesi gerektiğinden (didUpdateWidget karşılaştırması için)
+  // her istekte artan bir sayaç da taşınıyor.
+  MarketSymbol? _chartRequestSymbol;
+  int _chartRequestId = 0;
+
   static const _titles = ['Grafik ve Aylık En Düşük Değerler', 'Bildirimler'];
+
+  void _openChartFor(MarketSymbol symbol) {
+    setState(() {
+      _chartRequestSymbol = symbol;
+      _chartRequestId++;
+      _index = 0;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,9 +101,12 @@ class _RootShellState extends State<RootShell> {
       ),
       body: IndexedStack(
         index: _index,
-        children: const [
-          HomeScreen(),
-          NotificationsScreen(),
+        children: [
+          HomeScreen(
+            requestedSymbol: _chartRequestSymbol,
+            requestId: _chartRequestId,
+          ),
+          NotificationsScreen(onOpenChart: _openChartFor),
         ],
       ),
       bottomNavigationBar: NavigationBar(
