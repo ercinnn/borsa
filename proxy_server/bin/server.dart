@@ -84,9 +84,12 @@ Future<Response> _searchHandler(Request request) async {
 }
 
 // Desteklenen aralık kodları ve bunlara karşılık gelen Yahoo interval
-// parametreleri. '12mo' Yahoo'da yok; 1 aylık mumlar çekilip 12'şerli
-// gruplar halinde sunucu tarafında birleştiriliyor.
+// parametreleri. '12mo' ve '4h' Yahoo'da yok; sırasıyla 1 aylık ve 60
+// dakikalık mumlar çekilip sunucu tarafında birleştiriliyor (bkz. aşağıdaki
+// sentezleme mantığı).
 const _yahooIntervalFor = {
+  '60m': '60m',
+  '4h': '60m',
   '1d': '1d',
   '1wk': '1wk',
   '1mo': '1mo',
@@ -96,8 +99,14 @@ const _yahooIntervalFor = {
 
 String _twoDigits(int n) => n.toString().padLeft(2, '0');
 
+// Tüm tarihler UTC (bkz. yahoo_client.dart RawCandle.date); saat/dakika
+// etiketleri de UTC olarak gösteriliyor, borsa yerel saatine çevrilmiyor.
 String _formatPeriod(String interval, DateTime start, DateTime end) {
   switch (interval) {
+    case '60m':
+    case '4h':
+      return '${_twoDigits(start.day)}.${_twoDigits(start.month)} '
+          '${_twoDigits(start.hour)}:${_twoDigits(start.minute)}';
     case '1d':
     case '1wk':
       return '${_twoDigits(start.day)}.${_twoDigits(start.month)}.'
@@ -160,6 +169,36 @@ Future<Response> _candlesHandler(Request request) async {
       for (var i = 0; i < raw.length; i += 12) {
         final chunk = raw.sublist(i, i + 12 > raw.length ? raw.length : i + 12);
         if (chunk.isEmpty) continue;
+        final open = chunk.first.open;
+        final close = chunk.last.close;
+        final high = chunk.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+        final low = chunk.map((c) => c.low).reduce((a, b) => a < b ? a : b);
+        candles.add({
+          'period': _formatPeriod(interval, chunk.first.date, chunk.last.date),
+          'open': open,
+          'high': high,
+          'low': low,
+          'close': close,
+        });
+      }
+    } else if (interval == '4h') {
+      // Sabit-sayıda-mum gruplama (12mo'daki gibi) gün içi verilerde işe
+      // yaramıyor: tatil/hafta sonu boşlukları ve borsa açılış-kapanış
+      // saatleri yüzünden art arda 4 ham mum her zaman aynı 4 saatlik
+      // duvar-saati dilimine denk gelmeyebiliyor. Bunun yerine her mumu
+      // UTC'de 4 saatlik dilimlere (00-04, 04-08, ...) yuvarlayıp o dilime
+      // göre grupluyoruz.
+      final buckets = <int, List<RawCandle>>{};
+      for (final c in raw) {
+        final bucketHour = (c.date.hour ~/ 4) * 4;
+        final bucketStart = DateTime.utc(
+            c.date.year, c.date.month, c.date.day, bucketHour);
+        buckets.putIfAbsent(
+            bucketStart.millisecondsSinceEpoch, () => []).add(c);
+      }
+      final sortedKeys = buckets.keys.toList()..sort();
+      for (final key in sortedKeys) {
+        final chunk = buckets[key]!;
         final open = chunk.first.open;
         final close = chunk.last.close;
         final high = chunk.map((c) => c.high).reduce((a, b) => a > b ? a : b);
@@ -288,6 +327,59 @@ Future<Response> _watchlistBulkAddHandler(
   return _json({'symbols': await watchlist.symbolsFor(userId), 'added': added});
 }
 
+Future<Response> _favoritesGetHandler(
+    Request request, FavoritesStore favorites, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
+  return _json({'symbols': await favorites.symbolsFor(userId)});
+}
+
+Future<Response> _favoritesAddHandler(
+    Request request, FavoritesStore favorites, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final added = await favorites.add(userId, symbol);
+  return _json({'symbols': await favorites.symbolsFor(userId), 'added': added});
+}
+
+Future<Response> _favoritesRemoveHandler(
+    Request request, FavoritesStore favorites, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final removed = await favorites.remove(userId, symbol);
+  return _json({'symbols': await favorites.symbolsFor(userId), 'removed': removed});
+}
+
+Future<Response> _trackedGetHandler(
+    Request request, TrackedSymbolStore tracked, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
+  return _json({'symbol': await tracked.getFor(userId)});
+}
+
+Future<Response> _trackedSetHandler(
+    Request request, TrackedSymbolStore tracked, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  await tracked.setFor(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase()});
+}
+
 Future<Response> _notificationsGetHandler(
     Request request, NotificationStore notifications, SupabaseConfig config) async {
   final userId = await _authenticate(request, config);
@@ -324,6 +416,8 @@ void main(List<String> args) async {
   );
   final watchlist = WatchlistStore(supabaseConfig, _httpClient);
   final notifications = NotificationStore(supabaseConfig, _httpClient);
+  final favorites = FavoritesStore(supabaseConfig, _httpClient);
+  final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
 
@@ -351,6 +445,13 @@ void main(List<String> args) async {
         (r) => _watchlistRemoveHandler(r, watchlist, supabaseConfig))
     ..post('/api/watchlist/bulk-add',
         (r) => _watchlistBulkAddHandler(r, watchlist, supabaseConfig))
+    ..get('/api/favorites', (r) => _favoritesGetHandler(r, favorites, supabaseConfig))
+    ..post('/api/favorites/add',
+        (r) => _favoritesAddHandler(r, favorites, supabaseConfig))
+    ..post('/api/favorites/remove',
+        (r) => _favoritesRemoveHandler(r, favorites, supabaseConfig))
+    ..get('/api/tracked', (r) => _trackedGetHandler(r, trackedSymbol, supabaseConfig))
+    ..post('/api/tracked', (r) => _trackedSetHandler(r, trackedSymbol, supabaseConfig))
     ..get('/api/notifications',
         (r) => _notificationsGetHandler(r, notifications, supabaseConfig))
     ..post('/api/notifications/check-now',

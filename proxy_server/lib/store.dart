@@ -76,6 +76,71 @@ class WatchlistStore {
   }
 }
 
+/// Watchlist'ten bağımsız, ayrı bir liste: bildirim/aylık-dip kontrolü
+/// almaz, sadece kullanıcının hızlı erişim için işaretlediği semboller
+/// (Grafik ve Bildirimler sekmelerindeki yıldız butonu, Favoriler sekmesi).
+class FavoritesStore {
+  final SupabaseTable _table;
+
+  FavoritesStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'favorites');
+
+  Future<List<String>> symbolsFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'symbol',
+      filters: {'user_id': 'eq.$userId', 'order': 'symbol.asc'},
+    );
+    return rows.map((r) => r['symbol'] as String).toList();
+  }
+
+  Future<bool> add(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty) return false;
+    final inserted = await _table.insert(
+      {'user_id': userId, 'symbol': normalized},
+      onConflict: 'user_id,symbol',
+      prefer: 'resolution=ignore-duplicates,return=representation',
+    );
+    return inserted.isNotEmpty;
+  }
+
+  Future<bool> remove(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    final deleted = await _table.delete({
+      'user_id': 'eq.$userId',
+      'symbol': 'eq.$normalized',
+    });
+    return deleted.isNotEmpty;
+  }
+}
+
+/// Takip sekmesinde gösterilen, kullanıcı başına tek aktif sembol.
+class TrackedSymbolStore {
+  final SupabaseTable _table;
+
+  TrackedSymbolStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'tracked_symbol');
+
+  Future<String?> getFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'symbol',
+      filters: {'user_id': 'eq.$userId', 'limit': '1'},
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['symbol'] as String?;
+  }
+
+  Future<void> setFor(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty) return;
+    await _table.insert(
+      {'user_id': userId, 'symbol': normalized},
+      onConflict: 'user_id',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    );
+  }
+}
+
 class NotificationStore {
   final SupabaseTable _table;
 
