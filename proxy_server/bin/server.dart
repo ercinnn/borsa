@@ -8,9 +8,11 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
 import '../lib/coingecko_client.dart';
+import '../lib/env.dart';
 import '../lib/monthly_low_checker.dart';
 import '../lib/preset_lists.dart';
 import '../lib/store.dart';
+import '../lib/supabase_client.dart';
 import '../lib/yahoo_client.dart';
 
 final _httpClient = http.Client();
@@ -19,7 +21,7 @@ Middleware _cors() {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   };
 
   return (Handler innerHandler) {
@@ -193,35 +195,67 @@ Future<Response> _candlesHandler(Request request) async {
   }
 }
 
+/// `Authorization: Bearer <supabase access token>` header'ını Supabase'in
+/// `/auth/v1/user` ucuna sorup doğrular, geçerliyse kullanıcı id'sini döner.
+/// Bu proje hiçbir yerde ağır bir SDK kullanmadığından (yahoo_client,
+/// coingecko_client, supabase_client hepsi çıplak `http`) JWT'yi yerel
+/// imza doğrulamak yerine bu tek HTTP çağrısını tercih ettik.
+Future<String?> _authenticate(Request request, SupabaseConfig config) async {
+  final authHeader = request.headers['authorization'];
+  if (authHeader == null || !authHeader.startsWith('Bearer ')) return null;
+  final token = authHeader.substring(7);
+  try {
+    final resp = await _httpClient.get(
+      Uri.parse('${config.url}/auth/v1/user'),
+      headers: {'Authorization': 'Bearer $token', 'apikey': config.serviceKey},
+    );
+    if (resp.statusCode != 200) return null;
+    final user = jsonDecode(resp.body) as Map<String, dynamic>;
+    return user['id'] as String?;
+  } catch (_) {
+    return null;
+  }
+}
+
+Response _unauthorized() => _json({'error': 'Giriş gerekli'}, status: 401);
+
 Future<Response> _watchlistGetHandler(
-    Request request, WatchlistStore watchlist) async {
-  return _json({'symbols': watchlist.symbols});
+    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
+  return _json({'symbols': await watchlist.symbolsFor(userId)});
 }
 
 Future<Response> _watchlistAddHandler(
-    Request request, WatchlistStore watchlist) async {
+    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
     return _json({'error': 'symbol gerekli'}, status: 400);
   }
-  final added = await watchlist.add(symbol);
-  return _json({'symbols': watchlist.symbols, 'added': added});
+  final added = await watchlist.add(userId, symbol);
+  return _json({'symbols': await watchlist.symbolsFor(userId), 'added': added});
 }
 
 Future<Response> _watchlistRemoveHandler(
-    Request request, WatchlistStore watchlist) async {
+    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
     return _json({'error': 'symbol gerekli'}, status: 400);
   }
-  final removed = await watchlist.remove(symbol);
-  return _json({'symbols': watchlist.symbols, 'removed': removed});
+  final removed = await watchlist.remove(userId, symbol);
+  return _json({'symbols': await watchlist.symbolsFor(userId), 'removed': removed});
 }
 
 Future<Response> _watchlistBulkAddHandler(
-    Request request, WatchlistStore watchlist) async {
+    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final preset = body['preset'] as String?;
 
@@ -247,40 +281,46 @@ Future<Response> _watchlistBulkAddHandler(
       );
   }
 
-  final added = await watchlist.addAll(symbols);
-  return _json({'symbols': watchlist.symbols, 'added': added});
+  final added = await watchlist.addAll(userId, symbols);
+  return _json({'symbols': await watchlist.symbolsFor(userId), 'added': added});
 }
 
 Future<Response> _notificationsGetHandler(
-    Request request, NotificationStore notifications) async {
+    Request request, NotificationStore notifications, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
   final page = int.tryParse(request.url.queryParameters['page'] ?? '') ?? 1;
-  return _json(notifications.page(page));
+  final category = request.url.queryParameters['category'];
+  return _json(await notifications.page(userId, page, category: category));
 }
 
 bool _checkInProgress = false;
 
-Future<Response> _checkNowHandler(
-    Request request, MonthlyLowChecker checker, WatchlistStore watchlist) async {
+Future<Response> _checkNowHandler(Request request, MonthlyLowChecker checker,
+    WatchlistStore watchlist, SupabaseConfig config) async {
+  final userId = await _authenticate(request, config);
+  if (userId == null) return _unauthorized();
   if (_checkInProgress) {
     return _json({'started': false, 'message': 'Zaten devam eden bir kontrol var.'});
   }
   _checkInProgress = true;
-  // Sembol sayısı fazla olabileceğinden (BIST100 + ABD100 + kripto200 gibi
-  // toplu eklemeler sonrası) kontrol istekten bağımsız arka planda çalışır.
+  // Tüm kullanıcıları kapsayan global bir tarama (istekten bağımsız arka
+  // planda çalışır); buton sadece bunu erkenden tetikler.
   checker.checkAll().catchError((e) {
     stderr.writeln('Manuel kontrol başarısız: $e');
     return 0;
   }).whenComplete(() => _checkInProgress = false);
-  return _json({'started': true, 'symbolCount': watchlist.symbols.length});
+  final symbolCount = (await watchlist.symbolsFor(userId)).length;
+  return _json({'started': true, 'symbolCount': symbolCount});
 }
 
 void main(List<String> args) async {
-  final dataDir = Directory('data');
-  final watchlist = WatchlistStore(File('${dataDir.path}/watchlist.json'));
-  final notifications =
-      NotificationStore(File('${dataDir.path}/notifications.json'));
-  await watchlist.load();
-  await notifications.load();
+  final supabaseConfig = SupabaseConfig(
+    url: requireEnv('SUPABASE_URL'),
+    serviceKey: requireEnv('SUPABASE_SERVICE_KEY'),
+  );
+  final watchlist = WatchlistStore(supabaseConfig, _httpClient);
+  final notifications = NotificationStore(supabaseConfig, _httpClient);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
 
@@ -301,12 +341,16 @@ void main(List<String> args) async {
   final router = Router()
     ..get('/api/search', _searchHandler)
     ..get('/api/candles', _candlesHandler)
-    ..get('/api/watchlist', (r) => _watchlistGetHandler(r, watchlist))
-    ..post('/api/watchlist/add', (r) => _watchlistAddHandler(r, watchlist))
-    ..post('/api/watchlist/remove', (r) => _watchlistRemoveHandler(r, watchlist))
-    ..post('/api/watchlist/bulk-add', (r) => _watchlistBulkAddHandler(r, watchlist))
-    ..get('/api/notifications', (r) => _notificationsGetHandler(r, notifications))
-    ..post('/api/notifications/check-now', (r) => _checkNowHandler(r, checker, watchlist));
+    ..get('/api/watchlist', (r) => _watchlistGetHandler(r, watchlist, supabaseConfig))
+    ..post('/api/watchlist/add', (r) => _watchlistAddHandler(r, watchlist, supabaseConfig))
+    ..post('/api/watchlist/remove',
+        (r) => _watchlistRemoveHandler(r, watchlist, supabaseConfig))
+    ..post('/api/watchlist/bulk-add',
+        (r) => _watchlistBulkAddHandler(r, watchlist, supabaseConfig))
+    ..get('/api/notifications',
+        (r) => _notificationsGetHandler(r, notifications, supabaseConfig))
+    ..post('/api/notifications/check-now',
+        (r) => _checkNowHandler(r, checker, watchlist, supabaseConfig));
 
   final handler =
       const Pipeline().addMiddleware(_cors()).addHandler(router.call);

@@ -1,6 +1,11 @@
-import 'dart:convert';
-import 'dart:io';
+import 'package:http/http.dart' as http;
 
+import 'supabase_client.dart';
+
+/// Çok kullanıcılı: her metod bir [userId] alır, Supabase'e o kullanıcıya
+/// filtrelenmiş bir sorgu atar (in-memory cache yok — tek kullanıcılı
+/// dönemden kalan yaklaşım, farklı kullanıcıların verisinin karışma riski
+/// olmasın diye terk edildi).
 class WatchlistStore {
   static const defaultSymbols = [
     'THYAO.IS',
@@ -13,82 +18,105 @@ class WatchlistStore {
     'TSLA',
   ];
 
-  final File _file;
-  List<String> _symbols = [];
+  final SupabaseTable _table;
 
-  WatchlistStore(this._file);
+  WatchlistStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'watchlist');
 
-  List<String> get symbols => List.unmodifiable(_symbols);
-
-  Future<void> load() async {
-    if (await _file.exists()) {
-      final content = await _file.readAsString();
-      _symbols = (jsonDecode(content) as List).cast<String>();
-    } else {
-      _symbols = List.of(defaultSymbols);
-      await _save();
+  Future<List<String>> symbolsFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'symbol',
+      filters: {'user_id': 'eq.$userId', 'order': 'symbol.asc'},
+    );
+    if (rows.isEmpty) {
+      await addAll(userId, defaultSymbols);
+      return List.of(defaultSymbols)..sort();
     }
+    return rows.map((r) => r['symbol'] as String).toList();
   }
 
-  Future<bool> add(String symbol) async {
+  Future<bool> add(String userId, String symbol) async {
     final normalized = symbol.trim().toUpperCase();
-    if (normalized.isEmpty || _symbols.contains(normalized)) return false;
-    _symbols.add(normalized);
-    await _save();
-    return true;
+    if (normalized.isEmpty) return false;
+    final inserted = await _table.insert(
+      {'user_id': userId, 'symbol': normalized},
+      onConflict: 'user_id,symbol',
+      prefer: 'resolution=ignore-duplicates,return=representation',
+    );
+    return inserted.isNotEmpty;
   }
 
-  Future<int> addAll(List<String> symbols) async {
-    var added = 0;
+  Future<int> addAll(String userId, List<String> symbols) async {
+    final unique = <String>{};
     for (final symbol in symbols) {
       final normalized = symbol.trim().toUpperCase();
-      if (normalized.isEmpty || _symbols.contains(normalized)) continue;
-      _symbols.add(normalized);
-      added++;
+      if (normalized.isNotEmpty) unique.add(normalized);
     }
-    if (added > 0) await _save();
-    return added;
+    if (unique.isEmpty) return 0;
+    final inserted = await _table.insert(
+      [for (final s in unique) {'user_id': userId, 'symbol': s}],
+      onConflict: 'user_id,symbol',
+      prefer: 'resolution=ignore-duplicates,return=representation',
+    );
+    return inserted.length;
   }
 
-  Future<bool> remove(String symbol) async {
-    final removed = _symbols.remove(symbol.trim().toUpperCase());
-    if (removed) await _save();
-    return removed;
+  Future<bool> remove(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    final deleted = await _table.delete({
+      'user_id': 'eq.$userId',
+      'symbol': 'eq.$normalized',
+    });
+    return deleted.isNotEmpty;
   }
 
-  Future<void> _save() async {
-    await _file.parent.create(recursive: true);
-    await _file.writeAsString(jsonEncode(_symbols));
+  /// Arka plan aylık-dip kontrolü için: tüm kullanıcıların tüm sembolleri.
+  Future<List<Map<String, dynamic>>> allRows() {
+    return _table.select(columns: 'user_id,symbol');
   }
 }
 
 class NotificationStore {
-  final File _file;
-  List<Map<String, dynamic>> _items = []; // en yeni başta
+  final SupabaseTable _table;
 
-  NotificationStore(this._file);
+  NotificationStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'notifications');
 
-  Future<void> load() async {
-    if (await _file.exists()) {
-      final content = await _file.readAsString();
-      _items = (jsonDecode(content) as List).cast<Map<String, dynamic>>();
-    } else {
-      _items = [];
-    }
+  Future<bool> existsFor(String userId, String symbol, String dateKey) async {
+    final rows = await _table.select(
+      columns: 'id',
+      filters: {
+        'user_id': 'eq.$userId',
+        'symbol': 'eq.$symbol',
+        'date': 'eq.$dateKey',
+        'limit': '1',
+      },
+    );
+    return rows.isNotEmpty;
   }
 
-  bool existsFor(String symbol, String dateKey) {
-    return _items.any((n) => n['symbol'] == symbol && n['date'] == dateKey);
+  Future<void> add(String userId, Map<String, dynamic> item) async {
+    await _table.insert({...item, 'user_id': userId}, prefer: 'return=minimal');
   }
 
-  Future<void> add(Map<String, dynamic> item) async {
-    _items.insert(0, item);
-    await _save();
-  }
+  /// [category] verilirse ('bist', 'us' veya 'crypto') yalnızca o kategoriye
+  /// giren sembollerin bildirimleri sayfalanır (frontend'deki İzleme Listesi
+  /// alt sekmeleriyle aynı .IS/-USD sonek kuralı kullanılır).
+  Future<Map<String, dynamic>> page(
+    String userId,
+    int page, {
+    int pageSize = 100,
+    String? category,
+  }) async {
+    final rows = await _table.select(
+      filters: {'user_id': 'eq.$userId', 'order': 'createdAt.desc'},
+    );
+    final items = category == null
+        ? rows
+        : rows.where((n) => _categoryOf(n['symbol'] as String) == category).toList();
 
-  Map<String, dynamic> page(int page, {int pageSize = 100}) {
     final safePage = page < 1 ? 1 : page;
-    final total = _items.length;
+    final total = items.length;
     final totalPages = total == 0 ? 1 : (total / pageSize).ceil();
     final start = (safePage - 1) * pageSize;
     if (start >= total) {
@@ -101,15 +129,16 @@ class NotificationStore {
     }
     final end = (start + pageSize > total) ? total : start + pageSize;
     return {
-      'notifications': _items.sublist(start, end),
+      'notifications': items.sublist(start, end),
       'page': safePage,
       'totalPages': totalPages,
       'total': total,
     };
   }
 
-  Future<void> _save() async {
-    await _file.parent.create(recursive: true);
-    await _file.writeAsString(jsonEncode(_items));
+  static String _categoryOf(String symbol) {
+    if (symbol.endsWith('.IS')) return 'bist';
+    if (symbol.endsWith('-USD')) return 'crypto';
+    return 'us';
   }
 }

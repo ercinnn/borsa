@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'services/supabase_config.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(url: supabaseUrl, publishableKey: supabaseAnonKey);
   runApp(const BorsaTakipApp());
 }
 
@@ -19,7 +24,36 @@ class BorsaTakipApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const RootShell(),
+      home: const AuthGate(),
+    );
+  }
+}
+
+/// Oturum durumuna göre giriş ekranı ile ana uygulama arasında geçiş yapar.
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  late final Stream<AuthState> _authStateStream =
+      Supabase.instance.client.auth.onAuthStateChange;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: _authStateStream,
+      initialData: AuthState(
+        AuthChangeEvent.initialSession,
+        Supabase.instance.client.auth.currentSession,
+      ),
+      builder: (context, snapshot) {
+        final session =
+            snapshot.data?.session ?? Supabase.instance.client.auth.currentSession;
+        return session == null ? const LoginScreen() : const RootShell();
+      },
     );
   }
 }
@@ -39,7 +73,16 @@ class _RootShellState extends State<RootShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Borsa Takip · ${_titles[_index]}')),
+      appBar: AppBar(
+        title: Text('Borsa Takip · ${_titles[_index]}'),
+        actions: [
+          IconButton(
+            onPressed: () => Supabase.instance.client.auth.signOut(),
+            icon: const Icon(Icons.logout),
+            tooltip: 'Çıkış Yap',
+          ),
+        ],
+      ),
       body: IndexedStack(
         index: _index,
         children: const [

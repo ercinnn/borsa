@@ -2,5 +2,9 @@
 .packages
 build/
 
-# Çalışma zamanında oluşan izleme listesi ve bildirim verileri
+# Çalışma zamanında oluşan izleme listesi ve bildirim verileri (artık
+# kullanılmıyor, Supabase'e taşındı; eski dosyalar burada kalabilir)
 data/
+
+# Supabase gizli anahtarı — bkz. .env.example
+.env

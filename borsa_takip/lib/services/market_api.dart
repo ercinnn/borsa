@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/candle.dart';
 import '../models/interval.dart';
@@ -81,9 +82,14 @@ class MarketApi {
     return resp['added'] as int;
   }
 
-  Future<NotificationPage> getNotifications({int page = 1}) async {
-    final uri = Uri.parse('$_baseUrl/api/notifications')
-        .replace(queryParameters: {'page': '$page'});
+  /// [category]: 'bist', 'us' veya 'crypto'; verilmezse tüm bildirimler.
+  Future<NotificationPage> getNotifications({int page = 1, String? category}) async {
+    final uri = Uri.parse('$_baseUrl/api/notifications').replace(
+      queryParameters: {
+        'page': '$page',
+        'category': ?category,
+      },
+    );
     final resp = await _get(uri);
     return NotificationPage.fromJson(resp);
   }
@@ -96,10 +102,17 @@ class MarketApi {
     return resp['started'] as bool? ?? false;
   }
 
+  /// Watchlist/notifications uçları proxy_server'da bu token'ı doğrulayıp
+  /// isteği o kullanıcıya kısıtlar (bkz. bin/server.dart _authenticate).
+  Map<String, String> get _authHeaders {
+    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    return token == null ? {} : {'Authorization': 'Bearer $token'};
+  }
+
   Future<Map<String, dynamic>> _get(Uri uri) async {
     late final http.Response resp;
     try {
-      resp = await http.get(uri);
+      resp = await http.get(uri, headers: _authHeaders);
     } catch (e) {
       throw ApiException(
         'Proxy sunucusuna bağlanılamadı. "dart run bin/server.dart" '
@@ -114,7 +127,7 @@ class MarketApi {
     try {
       resp = await http.post(
         uri,
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', ..._authHeaders},
         body: jsonEncode(body),
       );
     } catch (e) {

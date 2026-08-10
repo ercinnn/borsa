@@ -10,3 +10,8 @@ services:
     dockerContext: ./proxy_server
     healthCheckPath: /api/watchlist
     autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false

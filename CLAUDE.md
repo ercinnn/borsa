@@ -17,9 +17,13 @@ Two independent Dart projects, run as two separate local processes:
   don't send CORS headers, so the Flutter **web** build cannot call them
   directly from the browser. It also proxies CoinGecko for the crypto
   preset list, and owns all persisted state (watchlist, notifications).
-- `borsa_takip/` — the Flutter web frontend. It only ever talks to
-  `proxy_server` (`http://localhost:8787`, hardcoded in
-  `lib/services/market_api.dart`), never to Yahoo/CoinGecko directly.
+- `borsa_takip/` — the Flutter web frontend. For market/watchlist/
+  notification data it only ever talks to `proxy_server` (`_baseUrl` in
+  `lib/services/market_api.dart`, defaults to `http://localhost:8787`,
+  overridable via `--dart-define=API_BASE_URL=...` for deployed builds),
+  never to Yahoo/CoinGecko directly. It talks directly to Supabase only for
+  auth (sign-up/sign-in/session), via `supabase_flutter` — never for
+  watchlist/notification data, which stays behind the proxy.
 
 Both must be running simultaneously for the app to work.
 
@@ -75,15 +79,36 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   Yahoo's `/v8/finance/chart/{symbol}` endpoint and parses OHLC candles.
   Both `/api/candles` and the monthly-low checker call it — don't duplicate
   Yahoo-parsing logic elsewhere.
-- `store.dart` — `WatchlistStore` and `NotificationStore`, both flat JSON
-  files under `proxy_server/data/` (gitignored, created on first run,
-  seeded with 8 default symbols). No database.
-- `monthly_low_checker.dart` — `MonthlyLowChecker.checkAll()` walks the
-  watchlist sequentially (300ms delay between symbols to avoid Yahoo
-  rate-limiting) and, per symbol, fetches the current month's daily candles
-  and compares today's low against the lowest of all *prior* days this
-  month. If today set a new low, it appends a notification (deduped by
-  `symbol+date`).
+- `store.dart` — `WatchlistStore` and `NotificationStore`, persisted in a
+  Supabase Postgres project via `supabase_client.dart` (a minimal PostgREST
+  wrapper, not the official SDK). Multi-tenant: every method takes a
+  `userId` and queries Supabase filtered to that user (no in-memory cache —
+  a single-user leftover from the pre-auth era, removed once data became
+  per-user). `symbolsFor(userId)` seeds a user's watchlist with 8 default
+  symbols the first time it's empty. `WatchlistStore.allRows()` returns
+  every user's `(user_id, symbol)` pairs for the background checker.
+  Table schema: `proxy_server/supabase_schema.sql` +
+  `supabase_schema_auth.sql` (run once each, in order, in the Supabase SQL
+  Editor — the second adds `user_id` and RLS). Requires `SUPABASE_URL` and
+  `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
+  read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
+  production set directly in Render). One-off local→Supabase data
+  migration: `dart run bin/migrate_to_supabase.dart` (idempotent, reads the
+  old `proxy_server/data/*.json` files if present).
+- Auth: `_authenticate()` in `bin/server.dart` reads the `Authorization:
+  Bearer <token>` header and validates it against Supabase's
+  `/auth/v1/user` endpoint (one HTTP call, not local JWT verification —
+  kept consistent with the rest of the codebase, which has no JWT
+  dependency). Guards every `/api/watchlist*` and `/api/notifications*`
+  handler; returns 401 if missing/invalid. `/api/search` and
+  `/api/candles` stay public (no per-user data).
+- `monthly_low_checker.dart` — `MonthlyLowChecker.checkAll()` groups all
+  users' watchlist rows by symbol (so a symbol watched by multiple users is
+  fetched from Yahoo only once), walks the distinct symbols sequentially
+  (300ms delay between each to avoid Yahoo rate-limiting), and for each
+  compares today's low against the lowest of all *prior* days this month.
+  If today set a new low, every user watching that symbol gets their own
+  notification (deduped by `userId+symbol+date`).
 - `preset_lists.dart` / `coingecko_client.dart` — static curated symbol
   lists (`bist100Symbols`, `usPopular100Symbols`) and a live CoinGecko
   top-N-by-market-cap fetch, used by `/api/watchlist/bulk-add`.
@@ -103,15 +128,22 @@ stays alive, there's no OS-level scheduler.
 
 ### Frontend (`borsa_takip`)
 
-`main.dart` → `RootShell` holds an `IndexedStack` of two independent tab
-screens behind a bottom `NavigationBar`: `HomeScreen` (chart/table) and
-`NotificationsScreen` (watchlist management + notification feed). They
-don't share state beyond both owning their own `MarketApi()` instance.
+`main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
+.onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
+`supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
+`IndexedStack` of two independent tab screens behind a bottom
+`NavigationBar`: `HomeScreen` (chart/table) and `NotificationsScreen`
+(watchlist management + notification feed). They don't share state beyond
+both owning their own `MarketApi()` instance. `services/supabase_config.dart`
+holds the (non-secret) Supabase URL + anon/publishable key, hardcoded as
+`String.fromEnvironment` defaults — same pattern as `API_BASE_URL`.
 
 `services/market_api.dart` is the only HTTP boundary — every screen goes
-through it, never calls `http` directly. All failures surface as
-`ApiException` with a Turkish message (including a specific one for "proxy
-not running").
+through it, never calls `http` directly. Every request attaches
+`Authorization: Bearer <current Supabase access token>` (see `_authHeaders`)
+so the backend can scope watchlist/notifications to the signed-in user. All
+failures surface as `ApiException` with a Turkish message (including a
+specific one for "proxy not running").
 
 `widgets/candlestick_chart.dart` renders with a `CustomPainter`
 (`_CandlestickPainter`), not a charting package — there was a real bug here

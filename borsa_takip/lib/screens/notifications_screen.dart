@@ -27,10 +27,14 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   String? _error;
 
   late final TabController _categoryTabController;
+  int _lastCategoryIndex = 0;
 
   // BIST sembolleri ".IS", kripto sembolleri "-USD" ile bitiyor (bkz.
   // preset_lists.dart / coingecko_client.dart); geri kalan her şey ABD/diğer
-  // sekmesinde toplanıyor.
+  // sekmesinde toplanıyor. Sıra proxy_server'daki NotificationStore
+  // kategori anahtarlarıyla (bist/us/crypto) eşleşiyor.
+  static const _categoryKeys = ['bist', 'us', 'crypto'];
+
   List<String> get _bistSymbols =>
       _watchlist.where((s) => s.endsWith('.IS')).toList();
   List<String> get _cryptoSymbols =>
@@ -50,15 +54,23 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
+  String get _currentCategoryKey => _categoryKeys[_categoryTabController.index];
+
   @override
   void initState() {
     super.initState();
     _categoryTabController = TabController(length: 3, vsync: this)
-      ..addListener(() {
-        if (mounted) setState(() {});
-      });
+      ..addListener(_onCategoryTabChanged);
     _loadWatchlist();
     _loadNotifications();
+  }
+
+  void _onCategoryTabChanged() {
+    if (_categoryTabController.indexIsChanging) return;
+    if (_categoryTabController.index == _lastCategoryIndex) return;
+    _lastCategoryIndex = _categoryTabController.index;
+    setState(() {});
+    _loadNotifications(page: 1);
   }
 
   @override
@@ -88,7 +100,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   Future<void> _loadNotifications({int? page}) async {
     setState(() => _loadingNotifications = true);
     try {
-      final result = await _api.getNotifications(page: page ?? _page);
+      final result = await _api.getNotifications(
+        page: page ?? _page,
+        category: _currentCategoryKey,
+      );
       if (!mounted) return;
       setState(() {
         _notificationPage = result;
@@ -259,7 +274,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           const SizedBox(height: 24),
           Row(
             children: [
-              Text('Bildirimler', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'Bildirimler · ${const ['BIST', 'ABD', 'Kripto'][_categoryTabController.index]}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const Spacer(),
               OutlinedButton.icon(
                 onPressed: _checking ? null : _checkNow,
