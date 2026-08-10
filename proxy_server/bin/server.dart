@@ -339,6 +339,7 @@ void main(List<String> args) async {
   });
 
   final router = Router()
+    ..get('/health', (r) => Response.ok('ok'))
     ..get('/api/search', _searchHandler)
     ..get('/api/candles', _candlesHandler)
     ..get('/api/watchlist', (r) => _watchlistGetHandler(r, watchlist, supabaseConfig))
