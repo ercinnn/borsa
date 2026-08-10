@@ -184,6 +184,144 @@ class _TechnicalScreenState extends State<TechnicalScreen> {
   }
 }
 
+/// Pivot satırları ve gösterge satırları için ⓘ diyaloğu içeriği (backend'deki
+/// `IndicatorRow.name`/pivot etiketleriyle birebir eşleşen anahtarlar).
+/// Investing.com'un kendi açıklama metinleri değil, bu ekrandaki formüllerin
+/// (bkz. proxy_server/lib/technical_analysis.dart) genel dille özetidir.
+const Map<String, String> _indicatorInfo = {
+  'R3': 'Direnç 3 (R3): Fiyatın yükselirken zorlanabileceği en uzak/güçlü '
+      'teorik direnç seviyesi. Bir önceki günün en yüksek (H), en düşük (L) '
+      've kapanış (C) fiyatlarından türetilir: Pivot = (H+L+C)/3, '
+      'R3 = H + 2×(Pivot − L).',
+  'R2': 'Direnç 2 (R2): R1\'den sonraki, daha güçlü teorik direnç seviyesi. '
+      'R2 = Pivot + (H − L), burada Pivot bir önceki günün H/L/C '
+      'ortalamasıdır.',
+  'R1': 'Direnç 1 (R1): Fiyatın yükselirken karşılaşabileceği en yakın '
+      'teorik direnç seviyesi. R1 = 2×Pivot − L (bir önceki günün en '
+      'düşüğü).',
+  'Pivot': 'Pivot Noktası: Bir önceki günün en yüksek (H), en düşük (L) ve '
+      'kapanış (C) fiyatlarının ortalaması — (H+L+C)/3. Günün "denge" '
+      'seviyesi kabul edilir: fiyat bunun üzerindeyse gün genelde alıcılı '
+      '(yükseliş eğilimli), altındaysa satıcılı (düşüş eğilimli) yorumlanır. '
+      'Diğer tüm destek/direnç seviyeleri bu değerden hesaplanır.',
+  'S1': 'Destek 1 (S1): Fiyatın düşerken karşılaşabileceği en yakın teorik '
+      'destek seviyesi. S1 = 2×Pivot − H (bir önceki günün en yükseği).',
+  'S2': 'Destek 2 (S2): S1\'den sonraki, daha güçlü teorik destek seviyesi. '
+      'S2 = Pivot − (H − L).',
+  'S3': 'Destek 3 (S3): Fiyatın düşerken zorlanabileceği en uzak/güçlü '
+      'teorik destek seviyesi. S3 = L − 2×(H − Pivot).',
+  'RSI(14)': 'RSI — Göreceli Güç Endeksi (14): Son 14 günün ortalama '
+      'kazanç ve kayıplarının oranından 0-100 arasında hesaplanan bir '
+      'momentum göstergesi. 70 üzeri "aşırı alım" (fiyat çok hızlı '
+      'yükselmiş, düzeltme gelebilir → Sat sinyali), 30 altı "aşırı satım" '
+      '(fiyat çok hızlı düşmüş, tepki yükselişi gelebilir → Al sinyali) '
+      'olarak yorumlanır.',
+  'STOCH(9,6) %K': 'Stokastik Osilatör (9,6) — %K: Son 9 günün en '
+      'yüksek/en düşük aralığında güncel kapanışın nerede durduğunu 0-100 '
+      'arasında ölçer. 80 üzeri aşırı alım (Sat), 20 altı aşırı satım (Al) '
+      'kabul edilir.',
+  'STOCH(9,6) %D': 'Stokastik Osilatör (9,6) — %D: %K çizgisinin son 6 '
+      'günlük ortalaması; %K\'dan daha yumuşak hareket eder. Aynı şekilde '
+      '80 üzeri aşırı alım (Sat), 20 altı aşırı satım (Al) kabul edilir.',
+  'STOCHRSI(14)': 'Stokastik RSI (14): RSI değerinin kendisine, son 14 '
+      'günlük en düşük-en yüksek RSI aralığındaki konumunu ölçen stokastik '
+      'formülü uygulanmış hali — düz RSI\'den daha hassas/hızlı hareket '
+      'eder. 80 üzeri aşırı alım (Sat), 20 altı aşırı satım (Al) kabul '
+      'edilir.',
+  'MACD(12,26)': 'MACD — Hareketli Ortalama Yakınsama/Iraksama: 12 günlük '
+      'üstel ortalama (EMA) ile 26 günlük EMA arasındaki fark olan "MACD '
+      'çizgisi", bu çizginin 9 günlük EMA\'sı olan "sinyal çizgisi" ile '
+      'karşılaştırılır. MACD, sinyalin üzerine çıkarsa momentum yükselişe '
+      'dönüyor demektir (Al); altına inerse düşüşe dönüyor demektir (Sat).',
+  'ATR(14)': 'ATR — Ortalama Gerçek Aralık (14): Son 14 günün gün-içi '
+      'fiyat hareket genişliğinin (oynaklık/volatilite) ortalaması. Yön '
+      'belirtmez, sadece piyasanın ne kadar sert hareket ettiğini gösterir '
+      '— bu yüzden Al/Sat sayımına dahil edilmez.',
+  'ADX(14)': 'ADX — Ortalama Yönsel Endeks (14): Bir trendin ne kadar '
+      '"güçlü" olduğunu 0-100 arasında ölçer (yön değil, şiddet). 25 üzeri '
+      'güçlü trend kabul edilir; bu durumda yükseliş yönü (+DI) düşüş '
+      'yönünden (−DI) baskınsa Al, tersi Sat sinyali verir. 25 altında '
+      'trend zayıf/yatay kabul edilir (Nötr).',
+  'CCI(14)': 'CCI — Emtia Kanal Endeksi (14): Fiyatın kendi son 14 günlük '
+      'ortalamasından (tipik fiyat üzerinden) ne kadar saptığını ölçer. '
+      '+100 üzeri fiyatın belirgin biçimde ortalamanın üzerinde olduğunu ve '
+      'yükseliş momentumunun güçlü olduğunu gösterir (Al); −100 altı tam '
+      'tersini gösterir (Sat).',
+  'Highs/Lows(14)': 'Highs/Lows (14): Son 14 günde günlük en yüksek ve en '
+      'düşük fiyatların bir önceki güne göre nasıl değiştiğinin ortalaması. '
+      'Pozitifse tepe ve dip noktaları yükseliyor demektir (yükseliş '
+      'trendi, Al); negatifse düşüyor demektir (düşüş trendi, Sat).',
+  'UO': 'UO — Ultimate (Nihai) Osilatör: Kısa (7 gün), orta (14 gün) ve '
+      'uzun (28 gün) vadeli alım baskısı oranlarını ağırlıklı biçimde '
+      'birleştiren bir momentum göstergesi (0-100). 70 üzeri aşırı alım '
+      '(Sat), 30 altı aşırı satım (Al) olarak yorumlanır.',
+  'ROC(12)': 'ROC — Değişim Oranı (12): Fiyatın 12 gün önceki değerine '
+      'göre yüzde kaç değiştiğini gösterir. Pozitifse fiyat 12 gün öncesine '
+      'göre yükselmiş demektir (Al); negatifse düşmüş demektir (Sat).',
+  'Williams %R(14)': 'Williams %R (14): Son 14 günün en yüksek fiyatına '
+      'göre güncel kapanışın ne kadar geride olduğunu −100 ile 0 arasında '
+      'ölçer (Stokastik\'in tersten hesaplanmış hali gibidir). −80 altı '
+      'aşırı satım (Al), −20 üzeri aşırı alım (Sat) kabul edilir.',
+  'Bull/Bear Power(13)': 'Bull/Bear Power (13, Elder): Günün en yüksek ve '
+      'en düşük fiyatlarının, 13 günlük üstel ortalamaya (EMA) olan '
+      'uzaklığını ölçer — alıcıların (Bull) ve satıcıların (Bear) fiyatı '
+      'ortalamadan ne kadar uzağa itebildiğini gösterir. Net değer '
+      '(Bull+Bear) pozitifse alıcılar baskın demektir (Al); negatifse '
+      'satıcılar baskın demektir (Sat).',
+};
+
+String _maInfo(int period) =>
+    'Hareketli Ortalama (MA$period): Son $period günün kapanış '
+    'fiyatlarının ortalaması — günlük fiyat gürültüsünü yumuşatıp genel '
+    'trendi gösterir. Basit (SMA) her güne eşit ağırlık verir; Üstel (EMA) '
+    'son günlere daha fazla ağırlık vererek fiyat değişimlerine daha hızlı '
+    'tepki verir. Genel kural: kapanış fiyatı ortalamanın üzerindeyse Al '
+    '(yükseliş trendi), altındaysa Sat (düşüş trendi) sinyali kabul edilir.';
+
+void _showInfoDialog(BuildContext context, String title, String body) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: AppColors.slate900,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: AppColors.slate800.withValues(alpha: 0.8)),
+      ),
+      title: Text(title,
+          style: const TextStyle(color: AppColors.slate100, fontWeight: FontWeight.w700)),
+      content: Text(body,
+          style: const TextStyle(color: AppColors.slate100, height: 1.4)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Kapat'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Bir gösterge/pivot/hareketli-ortalama etiketinin yanında gösterilen ⓘ
+/// simgesi; tıklanınca formülü ve genel anlamını açıklayan bir diyalog açar.
+class _InfoIcon extends StatelessWidget {
+  final String title;
+  final String body;
+  const _InfoIcon({required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.info_outline, size: 15, color: AppColors.slate400),
+      onPressed: () => _showInfoDialog(context, title, body),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+      visualDensity: VisualDensity.compact,
+      splashRadius: 14,
+      tooltip: 'Ne anlama geliyor?',
+    );
+  }
+}
+
 class _SymbolChip extends StatelessWidget {
   final String symbol;
   final bool selected;
@@ -363,8 +501,15 @@ class _TechnicalResultView extends StatelessWidget {
                   rows: [
                     for (final row in result.movingAverages)
                       DataRow(cells: [
-                        DataCell(Text('MA${row.period}',
-                            style: const TextStyle(color: AppColors.slate100))),
+                        DataCell(Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('MA${row.period}',
+                                style: const TextStyle(color: AppColors.slate100)),
+                            _InfoIcon(
+                                title: 'MA${row.period}', body: _maInfo(row.period)),
+                          ],
+                        )),
                         DataCell(_MaCell(value: row.sma, signal: row.smaSignal)),
                         DataCell(_MaCell(value: row.ema, signal: row.emaSignal)),
                       ]),
@@ -399,8 +544,17 @@ class _TechnicalResultView extends StatelessWidget {
                     children: [
                       Expanded(
                         flex: 3,
-                        child: Text(row.name,
-                            style: const TextStyle(color: AppColors.slate100)),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(row.name,
+                                  style: const TextStyle(color: AppColors.slate100)),
+                            ),
+                            _InfoIcon(
+                                title: row.name, body: _indicatorInfo[row.name] ?? ''),
+                          ],
+                        ),
                       ),
                       Expanded(
                         flex: 2,
@@ -446,6 +600,8 @@ class _PivotRow extends StatelessWidget {
               ),
             ),
           ),
+          _InfoIcon(title: label, body: _indicatorInfo[label] ?? ''),
+          const SizedBox(width: 4),
           Text(
             formatPrice(value),
             style: GoogleFonts.robotoMono(
