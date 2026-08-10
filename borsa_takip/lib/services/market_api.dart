@@ -172,7 +172,21 @@ class MarketApi {
   }
 
   Map<String, dynamic> _handle(http.Response resp) {
-    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    final Map<String, dynamic> body;
+    try {
+      body = jsonDecode(resp.body) as Map<String, dynamic>;
+    } catch (_) {
+      // Proxy JSON olmayan bir yanıt döndürdüyse (ör. shelf_router'ın düz
+      // metin "Route not found" 404'ü — sunucu henüz güncel kodu deploy
+      // etmemiş olabilir, ya da Render soğuk başlangıçta HTML hata sayfası
+      // dönebilir) jsonDecode'un ham "Unexpected token" hatasını olduğu
+      // gibi kullanıcıya göstermek yerine anlaşılır bir mesaj veriyoruz.
+      throw ApiException(
+        'Sunucudan beklenmeyen bir yanıt geldi (HTTP ${resp.statusCode}). '
+        'Proxy sunucusu güncel olmayabilir veya geçici olarak erişilemiyor '
+        'olabilir.',
+      );
+    }
     if (resp.statusCode != 200) {
       throw ApiException(body['error'] as String? ?? 'Bilinmeyen hata');
     }
