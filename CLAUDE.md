@@ -141,11 +141,16 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `/api/candles` stay public (no per-user data).
 - `monthly_low_checker.dart` — `MonthlyLowChecker.checkAll()` groups all
   users' watchlist rows by symbol (so a symbol watched by multiple users is
-  fetched from Yahoo only once), walks the distinct symbols sequentially
-  (300ms delay between each to avoid Yahoo rate-limiting), and for each
-  compares today's low against the lowest of all *prior* days this month.
-  If today set a new low, every user watching that symbol gets their own
-  notification (deduped by `userId+symbol+date`).
+  fetched from Yahoo only once), then walks the distinct symbols in
+  concurrent batches of 4 (a 300ms pause between batches, not between every
+  symbol, to avoid Yahoo rate-limiting while still being much faster than
+  fully sequential), and for each compares today's low against the lowest
+  of all *prior* days this month. If today set a new low, every user
+  watching that symbol gets a notification — existing ones are checked and
+  new ones inserted in one batched Supabase call per symbol (`existingUserIdsFor`
+  / `NotificationStore.addAll`) rather than one round-trip per user.
+  `yahoo_client.dart`'s `fetchChart()` also short-TTL-caches (2 min) by
+  symbol+range+interval, shared with `/api/candles`.
 - `preset_lists.dart` / `coingecko_client.dart` — static curated symbol
   lists (`bist100Symbols`, `usPopular100Symbols`, `cryptoFallbackSymbols`)
   and a live CoinGecko top-N-by-market-cap fetch, used by
@@ -310,44 +315,77 @@ adding a new interval rather than iterating `ChartInterval.values`.
 Bu proje Flutter/Material kullanıyor, Tailwind CSS yok (ne web'de ne
 başka bir yerde) — aşağıdaki kurallar orijinal Tailwind tabanlı bir
 tasarım sisteminin niyetini bu projenin gerçek araçlarına (Dart
-`TextStyle`/`EdgeInsets`/`ColorScheme`/widget'lar) çevirir. Her yeni
-ekran/bileşen ve mevcut bir ekrana dokunulan her revizyonda uygulanır;
-dokunulmayan ekranları geriye dönük güncellemek zorunlu değil ama o
-ekrana bir sonraki sefer dokunulduğunda bu kurallara çekilmeli.
+`TextStyle`/`EdgeInsets`/`ColorScheme`/`BoxDecoration`/widget'lar) çevirir.
+Her yeni ekran/bileşen ve mevcut bir ekrana dokunulan her revizyonda
+uygulanır; dokunulmayan ekranları geriye dönük güncellemek zorunlu değil
+ama o ekrana bir sonraki sefer dokunulduğunda bu kurallara çekilmeli.
 
-1. **Boşluklar (Spacing):** Sıkışık tasarımlara izin verme. Kart/konteyner
-   iç boşluğu minimum `EdgeInsets.all(24)` (Tailwind `p-6` karşılığı).
-   Elemanlar arası boşluk için `SizedBox(height: 16)`/`SizedBox(height: 24)`
-   ya da `Wrap(spacing: 16, runSpacing: 16)` (`gap-4`/`gap-6` karşılığı).
-2. **Renk sistemi:** Tailwind `slate` paletinin karşılıkları:
-   - Arka planlar: `Color(0xFFF8FAFC)` (`slate-50`) ya da
-     `Color(0xFFF1F5F9)` düşük opaklıkla (`slate-100/50`).
-   - Kartlar: beyaz zemin + `Border.all(color: Color(0xFFE2E8F0).withValues(alpha: 0.8))`
-     + `BorderRadius.circular(12)` + hafif gölge (`Card(elevation: 1)` ya da
-     `BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0,2))`) —
-     `bg-white border border-slate-200/80 shadow-sm rounded-xl` karşılığı.
-   - Metinler: ana başlıklar `Color(0xFF0F172A)` (`slate-900`), ikincil
-     metinler `Color(0xFF64748B)` (`slate-500`).
-   Bu renkleri her yerde tekrar yazmak yerine tek bir yerde (ör.
-   `lib/theme/app_colors.dart`) sabit olarak tanımlayıp oradan kullan.
-3. **Tipografi:** Başlıklarda `TextStyle(fontWeight: FontWeight.w600,
-   letterSpacing: -0.2)` (`font-semibold tracking-tight`); etiketlerde
-   `TextStyle(fontSize: 12, fontWeight: FontWeight.w500, letterSpacing: 0.8,
-   color: Color(0xFF94A3B8))` + metni `.toUpperCase()` ile büyük harfe
-   çevir (Flutter'da CSS `text-transform` karşılığı yok, string'i kendin
-   büyük harfe çevirmen gerekiyor) — `text-xs uppercase tracking-wider
-   text-slate-400 font-medium` karşılığı.
-4. **Etkileşimler:** Tıklanabilir her elemanı (buton, kart, link) `InkWell`/
-   `GestureDetector` ile sar; basılma anında hafif küçülme için
-   `AnimatedScale(scale: pressed ? 0.98 : 1.0, duration:
-   Duration(milliseconds: 150))`, hover'da gölge artışı için `MouseRegion`
-   + `AnimatedContainer(duration: Duration(milliseconds: 150))` kullan
-   (`transition-all duration-150 active:scale-[0.98] hover:shadow-md`
-   karşılığı). Web'de `InkWell`'in kendi hover/splash efekti zaten temel
-   bir geri bildirim verir, üstüne tam bu kuralı eklemek gerekmiyorsa en
-   azından `InkWell` kullanmayı atlama.
-5. **Layout ve hizalama:** Mevcut `Row`/`Column`/`Wrap`/`LayoutBuilder`
-   yapısını bozma (bkz. `candlestick_chart.dart`'taki responsive
-   `LayoutBuilder` kullanımı) — masaüstü ve mobil web'de aynı ekranın
-   düzgün göründüğünden emin ol, sabit genişlik/yükseklik yerine
-   `Expanded`/`Flexible`/`Wrap` tercih et.
+**Bu, önceki (açık/pastel slate) tasarım sisteminin yerine geçer** — bu
+oturumda eklenmiş olan `lib/theme/app_colors.dart`, `main.dart`'taki
+`_buildTheme()` ve `home_screen.dart`'taki kart yapısı henüz *eski* açık
+temayı uyguluyor; kod bu yeni koyu/tech temaya göre henüz güncellenmedi
+(bir sonraki UI revizyonunda ele alınacak).
+
+### Tema: Modern BIST/Borsa Analitik (Koyu & Tech Tema)
+
+1. **Tema ve arka planlar:**
+   - Ana arka plan: koyu/sade — `Color(0xFF020617)` (`slate-950`).
+   - Kart/panel arka planı: yarı saydam koyu "glassmorphism" —
+     `Color(0xFF0F172A)` (`slate-900`) `withValues(alpha: 0.6)` + arkasında
+     `BackdropFilter(filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12))`
+     (`ui.ImageFilter`, `dart:ui` importu gerekir) + `Border.all(color:
+     Color(0xFF1E293B).withValues(alpha: 0.8))` (`slate-800/80`) —
+     `bg-slate-900/60 backdrop-blur-md border border-slate-800/80` karşılığı.
+2. **Canlı gradyanlar ve vurgu renkleri:**
+   - Ana vurgu (Yükseliş): neon zümrüt→camgöbeği gradyanı —
+     `LinearGradient(colors: [Color(0xFF34D399), Color(0xFF06B6D4)])`
+     (`emerald-400` → `cyan-500`), `from-emerald-400 to-cyan-500` karşılığı.
+   - İkincil vurgu (Düşüş): gül→mor/eflatun gradyanı —
+     `LinearGradient(colors: [Color(0xFFF43F5E), Color(0xFFC026D3)])`
+     (`rose-500` → `fuchsia-600`), `from-rose-500 to-fuchsia-600` karşılığı.
+   - Tech glow efekti: grafik/kart/rozet gibi öne çıkan elemanlarda yumuşak
+     renkli gölge — `BoxShadow(color: Color(0xFF10B981).withValues(alpha:
+     0.15), blurRadius: 15)` (`shadow-[0_0_15px_rgba(16,185,129,0.15)]`
+     karşılığı; renk bullish/bearish'e göre emerald/rose olarak değişir).
+3. **Tipografi ve veri gösterimi:**
+   - Sayısal veri/fiyatlar: monospace + sıkı tracking —
+     `TextStyle(fontFamily: 'RobotoMono', fontWeight: FontWeight.w600,
+     letterSpacing: -0.2, color: Color(0xFFF1F5F9))` (`slate-100`) —
+     `font-mono`/`font-semibold tracking-tight text-slate-100` karşılığı.
+     **Not:** Flutter'da gerçek bir monospace font paket olarak
+     eklenmeden (`google_fonts` bağımlılığı ya da `pubspec.yaml`'a asset
+     font eklenip `fonts:` altında tanımlanması gerekir) `fontFamily:
+     'monospace'` sistemde otomatik bir şeye çözümlenmez — bu proje şu an
+     hiç ek font bağımlılığı kullanmıyor, ilk uygulamada bu karar
+     (hangi paket/font) verilmeli.
+   - Etiketler/ticker'lar: yüksek kontrast soluk metin —
+     `TextStyle(fontSize: 12, fontWeight: FontWeight.w500, letterSpacing:
+     0.8, color: Color(0xFF94A3B8))` (`slate-400`) + metni `.toUpperCase()`
+     ile büyük harfe çevir (Flutter'da CSS `text-transform` karşılığı yok)
+     — `text-xs font-medium text-slate-400 uppercase tracking-wider`
+     karşılığı.
+4. **Etkileşim ve mikro-animasyonlar:** Buton/kartları `MouseRegion` +
+   `AnimatedContainer(duration: Duration(milliseconds: 200))` ile sarıp
+   hover'da border rengini `Color(0xFF06B6D4).withValues(alpha: 0.5)`
+   (`cyan-500/50`) yap; basılma hissi için `lib/widgets/pressable_scale.dart`
+   içindeki `PressableScale`'i kullan (zaten `Listener` tabanlı olduğundan
+   içindeki Material buton/kartın kendi tıklama davranışını bozmuyor) —
+   `hover:border-cyan-500/50 transition-all duration-200
+   active:scale-[0.98]` karşılığı. Önceki tasarımdaki 150ms yerine bu
+   temada geçiş süresi 200ms.
+
+### Görsel doğrulama: Playwright MCP
+
+Bu kuralları uygulayan bir değişiklikten sonra sonucu görsel olarak
+doğrulamak için proje kapsamında bir Playwright MCP sunucusu tanımlı
+(`.mcp.json`, `claude mcp add playwright --scope project -- npx -y
+@modelcontextprotocol/server-playwright` ile eklendi). MCP sunucu
+tanımları yalnızca **oturum başlangıcında** yüklenir — `.mcp.json`'a yeni
+bir sunucu eklendiğinde o an açık olan oturumda görünmez, kullanılabilmesi
+için Claude Code'un yeniden başlatılması gerekir. Canlı siteyi (`https://
+ercinnn.github.io/borsa/`) login gerektirmeden incelemek login ekranıyla
+sınırlı kalır; login sonrası ekranları görsel doğrulamak için ya gerçek
+bir Supabase hesabıyla giriş yapılmalı ya da `claude-in-chrome` ile
+kullanıcının zaten oturum açmış olduğu gerçek Chrome sekmesi kullanılmalı
+(bkz. Deployment bölümündeki proxy_server yerel çalıştırma notu — yerelde
+çalıştırmak için `proxy_server/.env` de gerekiyor).
