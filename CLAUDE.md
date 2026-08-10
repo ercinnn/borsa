@@ -119,8 +119,13 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   If today set a new low, every user watching that symbol gets their own
   notification (deduped by `userId+symbol+date`).
 - `preset_lists.dart` / `coingecko_client.dart` — static curated symbol
-  lists (`bist100Symbols`, `usPopular100Symbols`) and a live CoinGecko
-  top-N-by-market-cap fetch, used by `/api/watchlist/bulk-add`.
+  lists (`bist100Symbols`, `usPopular100Symbols`, `cryptoFallbackSymbols`)
+  and a live CoinGecko top-N-by-market-cap fetch, used by
+  `/api/watchlist/bulk-add`. `fetchTopCryptoSymbols()` retries a few times
+  with backoff on CoinGecko 429s, optionally authenticated via
+  `COINGECKO_API_KEY` (`x-cg-demo-api-key` header, opt-in — see Deployment);
+  if all retries fail and there's no cached result, the `crypto200` handler
+  falls back to the static `cryptoFallbackSymbols` list rather than erroring.
 
 `GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
 as a target for Render's health check; `/api/*` routes are the wrong choice
@@ -187,6 +192,11 @@ as-is, it does no date formatting of its own for chart data.
   `proxy_server/Dockerfile`). Needs `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
   set as env vars directly in the Render dashboard (Environment tab) —
   `render.yaml` only declares the *names* (`sync: false`), never the values.
+  `COINGECKO_API_KEY` is also declared there but optional: a free CoinGecko
+  "Demo" key (from coingecko.com/en/developers/dashboard) raises the
+  crypto200 preset's rate limit well above the shared-IP anonymous tier;
+  without it the proxy still works, just retries more and is more likely to
+  fall back to the static crypto list under load.
   Free tier spins down after ~15 min idle; first request after that takes
   30–50s.
 - **Auto-deploy is unreliable in practice**: Render's service has

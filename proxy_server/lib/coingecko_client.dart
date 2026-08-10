@@ -14,10 +14,25 @@ List<String>? _cachedSymbols;
 int? _cachedCount;
 DateTime? _cachedAt;
 
-/// CoinGecko'nun ücretsiz, anahtar gerektirmeyen piyasa verisi ucundan
-/// piyasa değerine göre ilk [count] kriptoyu çekip Yahoo Finance uyumlu
-/// "SEMBOL-USD" formatında döndürür.
-Future<List<String>> fetchTopCryptoSymbols(http.Client client, int count) async {
+// 429'da art arda denenen bekleme süreleri; toplamda ~26sn, bir buton
+// tıklamasının makul karşılayabileceği bir üst sınır.
+const _retryDelays = [
+  Duration(seconds: 3),
+  Duration(seconds: 8),
+  Duration(seconds: 15),
+];
+
+/// CoinGecko'nun piyasa verisi ucundan piyasa değerine göre ilk [count]
+/// kriptoyu çekip Yahoo Finance uyumlu "SEMBOL-USD" formatında döndürür.
+/// [apiKey] verilirse CoinGecko'nun ücretsiz "Demo" plan header'ı
+/// (`x-cg-demo-api-key`) eklenir; bu, anahtarsız uca göre çok daha yüksek
+/// bir rate limit sağlar. Anahtar yoksa anahtarsız, düşük limitli uç
+/// kullanılmaya devam eder.
+Future<List<String>> fetchTopCryptoSymbols(
+  http.Client client,
+  int count, {
+  String? apiKey,
+}) async {
   final now = DateTime.now();
   if (_cachedSymbols != null &&
       _cachedCount == count &&
@@ -33,11 +48,16 @@ Future<List<String>> fetchTopCryptoSymbols(http.Client client, int count) async 
     'page': '1',
     'sparkline': 'false',
   });
+  final headers = {
+    'User-Agent': userAgent,
+    if (apiKey != null && apiKey.isNotEmpty) 'x-cg-demo-api-key': apiKey,
+  };
 
-  var resp = await client.get(uri, headers: {'User-Agent': userAgent});
-  if (resp.statusCode == 429) {
-    await Future.delayed(const Duration(seconds: 5));
-    resp = await client.get(uri, headers: {'User-Agent': userAgent});
+  var resp = await client.get(uri, headers: headers);
+  for (final delay in _retryDelays) {
+    if (resp.statusCode != 429) break;
+    await Future.delayed(delay);
+    resp = await client.get(uri, headers: headers);
   }
 
   if (resp.statusCode != 200) {

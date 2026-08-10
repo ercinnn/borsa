@@ -4,6 +4,11 @@
 // bileşimi zamanla değiştiğinden bu listeler dönemsel bir anlık görüntüdür;
 // yanlış veya güncelliğini yitirmiş bir sembol olsa bile kontrol servisi
 // o sembolü sessizce atlar (checkAll tek sembol hatasında durmaz).
+//
+// cryptoFallbackSymbols aynı mantıkla, ama farklı bir amaçla var: normalde
+// kripto listesi CoinGecko'dan canlı çekilir (bkz. coingecko_client.dart);
+// bu liste sadece CoinGecko rate limit/erişim sorunu yüzünden tamamen
+// başarısız olduğunda son çare yedek olarak kullanılır.
 
 const bist100Symbols = [
   'THYAO.IS', 'ASELS.IS', 'GARAN.IS', 'AKBNK.IS', 'ISCTR.IS', 'YKBNK.IS',
@@ -37,4 +42,35 @@ const usPopular100Symbols = [
   'TJX', 'CB', 'MO', 'SCHW', 'ZTS', 'CVS', 'REGN', 'SO', 'BDX', 'PGR',
   'DUK', 'CI', 'BSX', 'ETN', 'AON', 'MU', 'EOG', 'NOC', 'SLB', 'PYPL',
   'ITW', 'SNPS', 'GD', 'EQIX', 'TGT',
+];
+
+const cryptoFallbackSymbols = [
+  'BTC-USD', 'ETH-USD', 'USDT-USD', 'XRP-USD', 'BNB-USD', 'SOL-USD',
+  'USDC-USD', 'DOGE-USD', 'ADA-USD', 'TRX-USD', 'WBTC-USD', 'LINK-USD',
+  'AVAX-USD', 'SUI-USD', 'XLM-USD', 'TON-USD', 'SHIB-USD', 'HBAR-USD',
+  'BCH-USD', 'DOT-USD', 'LEO-USD', 'LTC-USD', 'XMR-USD', 'DAI-USD',
+  'UNI-USD', 'PEPE-USD', 'AAVE-USD', 'TAO-USD', 'APT-USD', 'NEAR-USD',
+  'ETC-USD', 'OKB-USD', 'ICP-USD', 'MNT-USD', 'CRO-USD', 'KAS-USD',
+  'MATIC-USD', 'VET-USD', 'ALGO-USD', 'RENDER-USD', 'ATOM-USD', 'FIL-USD',
+  'TIA-USD', 'ARB-USD', 'FET-USD', 'STX-USD', 'IMX-USD', 'INJ-USD',
+  'OP-USD', 'WLD-USD', 'THETA-USD', 'RUNE-USD', 'GRT-USD', 'FLOW-USD',
+  'LDO-USD', 'SEI-USD', 'JUP-USD', 'PYTH-USD', 'KAVA-USD', 'QNT-USD',
+  'XTZ-USD', 'MKR-USD', 'EGLD-USD', 'SAND-USD', 'MANA-USD', 'AXS-USD',
+  'CHZ-USD', 'GALA-USD', 'ZEC-USD', 'EOS-USD', 'XEC-USD', 'NEO-USD',
+  'KCS-USD', 'FTM-USD', 'MINA-USD', 'KLAY-USD', 'WAVES-USD', 'ENJ-USD',
+  'BAT-USD', 'ZIL-USD', 'ANKR-USD', 'COMP-USD', 'SNX-USD', 'CRV-USD',
+  '1INCH-USD', 'YFI-USD', 'SUSHI-USD', 'DYDX-USD', 'GMX-USD', 'LRC-USD',
+  'OCEAN-USD', 'ROSE-USD', 'CELO-USD', 'IOTA-USD', 'XDC-USD', 'GNO-USD',
+  'BAL-USD', 'REN-USD', 'KNC-USD', 'STORJ-USD', 'SKL-USD', 'ANT-USD',
+  'BAND-USD', 'CVC-USD', 'NMR-USD', 'UMA-USD', 'RSR-USD', 'POWR-USD',
+  'OXT-USD', 'NKN-USD', 'DENT-USD', 'HOT-USD', 'ICX-USD', 'ONT-USD',
+  'QTUM-USD', 'ZRX-USD', 'RVN-USD', 'SC-USD', 'DGB-USD', 'DCR-USD',
+  'LSK-USD', 'NANO-USD', 'XVG-USD', 'BTG-USD', 'ZEN-USD', 'XEM-USD',
+  'WAXP-USD', 'ELF-USD', 'CELR-USD', 'COTI-USD', 'ONE-USD', 'IOST-USD',
+  'HIVE-USD', 'STEEM-USD', 'ARDR-USD', 'PIVX-USD', 'VTHO-USD', 'GAS-USD',
+  'WTC-USD', 'REP-USD', 'MTL-USD', 'DASH-USD', 'FLR-USD', 'AKT-USD',
+  'JASMY-USD', 'ORDI-USD', 'BONK-USD', 'WIF-USD', 'FLOKI-USD', 'PENDLE-USD',
+  'ENS-USD', 'BLUR-USD', 'CFX-USD', 'MASK-USD', 'API3-USD', 'ILV-USD',
+  'AUDIO-USD', 'SXP-USD', 'ALPHA-USD', 'RLC-USD', 'CTSI-USD',
+  'STRK-USD', 'W-USD', 'ETHFI-USD', 'ENA-USD', 'ZK-USD', 'NOT-USD',
 ];

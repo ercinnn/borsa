@@ -16,6 +16,7 @@ import '../lib/supabase_client.dart';
 import '../lib/yahoo_client.dart';
 
 final _httpClient = http.Client();
+final _coingeckoApiKey = env('COINGECKO_API_KEY');
 
 Middleware _cors() {
   const headers = {
@@ -269,9 +270,11 @@ Future<Response> _watchlistBulkAddHandler(
       break;
     case 'crypto200':
       try {
-        symbols = await fetchTopCryptoSymbols(_httpClient, 200);
+        symbols = await fetchTopCryptoSymbols(_httpClient, 200,
+            apiKey: _coingeckoApiKey);
       } catch (e) {
-        return _json({'error': 'Kripto listesi alınamadı: $e'}, status: 502);
+        stderr.writeln('CoinGecko fetch failed, statik yedek listeye düşülüyor: $e');
+        symbols = cryptoFallbackSymbols;
       }
       break;
     default:
