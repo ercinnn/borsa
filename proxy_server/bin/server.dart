@@ -255,6 +255,23 @@ Future<Response> _candlesHandler(Request request) async {
   }
 }
 
+class _AuthCacheEntry {
+  final String userId;
+  final DateTime expiresAt;
+  _AuthCacheEntry(this.userId, this.expiresAt);
+}
+
+// Bir istemcinin kısa bir sürede birden fazla istek atması yaygın (ör. uygulama
+// açılışında watchlist+favorites+notifications+tracked eşzamanlı çekiliyor);
+// her biri için ayrı bir Supabase /auth/v1/user çağrısı yapmak yerine geçerli
+// bir token'ı kısa süreliğine önbelleğe alıyoruz. 60sn, oturumu Supabase'de
+// hemen iptal edilen bir kullanıcının en fazla bu kadar süre daha
+// doğrulanmış sayılabileceği anlamına gelir — kişisel ölçekli bu uygulama
+// için kabul edilebilir bir ödünleşim.
+final _authCache = <String, _AuthCacheEntry>{};
+const _authCacheTtl = Duration(seconds: 60);
+const _authCacheMaxEntries = 200;
+
 /// `Authorization: Bearer <supabase access token>` header'ını Supabase'in
 /// `/auth/v1/user` ucuna sorup doğrular, geçerliyse kullanıcı id'sini döner.
 /// Bu proje hiçbir yerde ağır bir SDK kullanmadığından (yahoo_client,
@@ -264,6 +281,13 @@ Future<String?> _authenticate(Request request, SupabaseConfig config) async {
   final authHeader = request.headers['authorization'];
   if (authHeader == null || !authHeader.startsWith('Bearer ')) return null;
   final token = authHeader.substring(7);
+
+  final now = DateTime.now();
+  final cached = _authCache[token];
+  if (cached != null && cached.expiresAt.isAfter(now)) {
+    return cached.userId;
+  }
+
   try {
     final resp = await _httpClient.get(
       Uri.parse('${config.url}/auth/v1/user'),
@@ -271,7 +295,13 @@ Future<String?> _authenticate(Request request, SupabaseConfig config) async {
     );
     if (resp.statusCode != 200) return null;
     final user = jsonDecode(resp.body) as Map<String, dynamic>;
-    return user['id'] as String?;
+    final userId = user['id'] as String?;
+    if (userId != null) {
+      _authCache.removeWhere((_, e) => e.expiresAt.isBefore(now));
+      if (_authCache.length > _authCacheMaxEntries) _authCache.clear();
+      _authCache[token] = _AuthCacheEntry(userId, now.add(_authCacheTtl));
+    }
+    return userId;
   } catch (_) {
     return null;
   }
@@ -279,17 +309,26 @@ Future<String?> _authenticate(Request request, SupabaseConfig config) async {
 
 Response _unauthorized() => _json({'error': 'Giriş gerekli'}, status: 401);
 
+/// Korumalı bir handler'ı auth kontrolüyle sarar: her handler kendi
+/// `_authenticate` + null-kontrolü + `_unauthorized()` iskeletini
+/// tekrarlamak yerine, router bu wrapper üzerinden kaydediliyor.
+typedef _AuthedHandler = Future<Response> Function(Request request, String userId);
+
+Handler _withAuth(SupabaseConfig config, _AuthedHandler handler) {
+  return (Request request) async {
+    final userId = await _authenticate(request, config);
+    if (userId == null) return _unauthorized();
+    return handler(request, userId);
+  };
+}
+
 Future<Response> _watchlistGetHandler(
-    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, WatchlistStore watchlist) async {
   return _json({'symbols': await watchlist.symbolsFor(userId)});
 }
 
 Future<Response> _watchlistAddHandler(
-    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, WatchlistStore watchlist) async {
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
@@ -300,9 +339,7 @@ Future<Response> _watchlistAddHandler(
 }
 
 Future<Response> _watchlistRemoveHandler(
-    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, WatchlistStore watchlist) async {
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
@@ -313,9 +350,7 @@ Future<Response> _watchlistRemoveHandler(
 }
 
 Future<Response> _watchlistBulkAddHandler(
-    Request request, WatchlistStore watchlist, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, WatchlistStore watchlist) async {
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final preset = body['preset'] as String?;
 
@@ -348,16 +383,12 @@ Future<Response> _watchlistBulkAddHandler(
 }
 
 Future<Response> _favoritesGetHandler(
-    Request request, FavoritesStore favorites, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, FavoritesStore favorites) async {
   return _json({'symbols': await favorites.symbolsFor(userId)});
 }
 
 Future<Response> _favoritesAddHandler(
-    Request request, FavoritesStore favorites, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, FavoritesStore favorites) async {
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
@@ -368,9 +399,7 @@ Future<Response> _favoritesAddHandler(
 }
 
 Future<Response> _favoritesRemoveHandler(
-    Request request, FavoritesStore favorites, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, FavoritesStore favorites) async {
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
@@ -381,16 +410,12 @@ Future<Response> _favoritesRemoveHandler(
 }
 
 Future<Response> _trackedGetHandler(
-    Request request, TrackedSymbolStore tracked, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, TrackedSymbolStore tracked) async {
   return _json({'symbol': await tracked.getFor(userId)});
 }
 
 Future<Response> _trackedSetHandler(
-    Request request, TrackedSymbolStore tracked, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, TrackedSymbolStore tracked) async {
   final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
   final symbol = body['symbol'] as String?;
   if (symbol == null || symbol.trim().isEmpty) {
@@ -401,9 +426,7 @@ Future<Response> _trackedSetHandler(
 }
 
 Future<Response> _notificationsGetHandler(
-    Request request, NotificationStore notifications, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+    Request request, String userId, NotificationStore notifications) async {
   final page = int.tryParse(request.url.queryParameters['page'] ?? '') ?? 1;
   final category = request.url.queryParameters['category'];
   return _json(await notifications.page(userId, page, category: category));
@@ -411,10 +434,8 @@ Future<Response> _notificationsGetHandler(
 
 bool _checkInProgress = false;
 
-Future<Response> _checkNowHandler(Request request, MonthlyLowChecker checker,
-    WatchlistStore watchlist, SupabaseConfig config) async {
-  final userId = await _authenticate(request, config);
-  if (userId == null) return _unauthorized();
+Future<Response> _checkNowHandler(Request request, String userId,
+    MonthlyLowChecker checker, WatchlistStore watchlist) async {
   if (_checkInProgress) {
     return _json({'started': false, 'message': 'Zaten devam eden bir kontrol var.'});
   }
@@ -459,23 +480,50 @@ void main(List<String> args) async {
     ..get('/health', (r) => Response.ok('ok'))
     ..get('/api/search', _searchHandler)
     ..get('/api/candles', _candlesHandler)
-    ..get('/api/watchlist', (r) => _watchlistGetHandler(r, watchlist, supabaseConfig))
-    ..post('/api/watchlist/add', (r) => _watchlistAddHandler(r, watchlist, supabaseConfig))
-    ..post('/api/watchlist/remove',
-        (r) => _watchlistRemoveHandler(r, watchlist, supabaseConfig))
-    ..post('/api/watchlist/bulk-add',
-        (r) => _watchlistBulkAddHandler(r, watchlist, supabaseConfig))
-    ..get('/api/favorites', (r) => _favoritesGetHandler(r, favorites, supabaseConfig))
-    ..post('/api/favorites/add',
-        (r) => _favoritesAddHandler(r, favorites, supabaseConfig))
-    ..post('/api/favorites/remove',
-        (r) => _favoritesRemoveHandler(r, favorites, supabaseConfig))
-    ..get('/api/tracked', (r) => _trackedGetHandler(r, trackedSymbol, supabaseConfig))
-    ..post('/api/tracked', (r) => _trackedSetHandler(r, trackedSymbol, supabaseConfig))
-    ..get('/api/notifications',
-        (r) => _notificationsGetHandler(r, notifications, supabaseConfig))
-    ..post('/api/notifications/check-now',
-        (r) => _checkNowHandler(r, checker, watchlist, supabaseConfig));
+    ..get(
+      '/api/watchlist',
+      _withAuth(supabaseConfig, (r, uid) => _watchlistGetHandler(r, uid, watchlist)),
+    )
+    ..post(
+      '/api/watchlist/add',
+      _withAuth(supabaseConfig, (r, uid) => _watchlistAddHandler(r, uid, watchlist)),
+    )
+    ..post(
+      '/api/watchlist/remove',
+      _withAuth(supabaseConfig, (r, uid) => _watchlistRemoveHandler(r, uid, watchlist)),
+    )
+    ..post(
+      '/api/watchlist/bulk-add',
+      _withAuth(supabaseConfig, (r, uid) => _watchlistBulkAddHandler(r, uid, watchlist)),
+    )
+    ..get(
+      '/api/favorites',
+      _withAuth(supabaseConfig, (r, uid) => _favoritesGetHandler(r, uid, favorites)),
+    )
+    ..post(
+      '/api/favorites/add',
+      _withAuth(supabaseConfig, (r, uid) => _favoritesAddHandler(r, uid, favorites)),
+    )
+    ..post(
+      '/api/favorites/remove',
+      _withAuth(supabaseConfig, (r, uid) => _favoritesRemoveHandler(r, uid, favorites)),
+    )
+    ..get(
+      '/api/tracked',
+      _withAuth(supabaseConfig, (r, uid) => _trackedGetHandler(r, uid, trackedSymbol)),
+    )
+    ..post(
+      '/api/tracked',
+      _withAuth(supabaseConfig, (r, uid) => _trackedSetHandler(r, uid, trackedSymbol)),
+    )
+    ..get(
+      '/api/notifications',
+      _withAuth(supabaseConfig, (r, uid) => _notificationsGetHandler(r, uid, notifications)),
+    )
+    ..post(
+      '/api/notifications/check-now',
+      _withAuth(supabaseConfig, (r, uid) => _checkNowHandler(r, uid, checker, watchlist)),
+    );
 
   final handler = const Pipeline()
       .addMiddleware(_cors())

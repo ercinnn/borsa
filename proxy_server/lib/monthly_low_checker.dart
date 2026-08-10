@@ -15,6 +15,12 @@ class MonthlyLowChecker {
 
   MonthlyLowChecker(this.client, this.watchlist, this.notifications);
 
+  // Sembolleri küçük gruplar halinde eşzamanlı işliyoruz: tamamen sıralı
+  // (300ms/sembol) büyük bir watchlist'te taramayı dakikalarca sürdürüyordu;
+  // grup içi eşzamanlılık bunu ~_batchSize kat hızlandırırken, gruplar
+  // arasındaki gecikme Yahoo'yu tek seferde N isteğe boğmamak için korunuyor.
+  static const _batchSize = 4;
+
   Future<int> checkAll() async {
     final rows = await watchlist.allRows();
     final usersBySymbol = <String, List<String>>{};
@@ -26,13 +32,24 @@ class MonthlyLowChecker {
     }
 
     var created = 0;
-    for (final entry in usersBySymbol.entries) {
-      try {
-        created += await _checkSymbol(entry.key, entry.value);
-      } catch (_) {
-        // Tek bir sembolün hatası tüm taramayı durdurmasın.
+    final entries = usersBySymbol.entries.toList();
+    for (var i = 0; i < entries.length; i += _batchSize) {
+      final batch = entries.sublist(
+        i,
+        (i + _batchSize) > entries.length ? entries.length : i + _batchSize,
+      );
+      final results = await Future.wait(batch.map((entry) async {
+        try {
+          return await _checkSymbol(entry.key, entry.value);
+        } catch (_) {
+          // Tek bir sembolün hatası tüm taramayı durdurmasın.
+          return 0;
+        }
+      }));
+      created += results.fold(0, (a, b) => a + b);
+      if (i + _batchSize < entries.length) {
+        await Future.delayed(const Duration(milliseconds: 300));
       }
-      await Future.delayed(const Duration(milliseconds: 300));
     }
     return created;
   }
@@ -56,22 +73,27 @@ class MonthlyLowChecker {
 
     if (today.low > priorLow) return 0;
 
-    var created = 0;
-    for (final userId in userIds) {
-      if (await notifications.existsFor(userId, symbol, dateKey)) continue;
-      await notifications.add(userId, {
-        'id': '$userId-$symbol-$dateKey-${DateTime.now().millisecondsSinceEpoch}',
-        'symbol': symbol,
-        'price': today.low,
-        'currency': data.currency,
-        'date': dateKey,
-        'createdAt': DateTime.now().toIso8601String(),
-        'message':
-            '$symbol bu ayki en düşük değerine ulaştı: ${today.low.toStringAsFixed(4)} ${data.currency}',
-      });
-      created++;
-    }
-    return created;
+    final alreadyNotified =
+        await notifications.existingUserIdsFor(symbol, dateKey, userIds);
+    final toNotify = userIds.where((id) => !alreadyNotified.contains(id));
+
+    final createdAt = DateTime.now().toIso8601String();
+    final items = [
+      for (final userId in toNotify)
+        {
+          'id': '$userId-$symbol-$dateKey-${DateTime.now().millisecondsSinceEpoch}',
+          'user_id': userId,
+          'symbol': symbol,
+          'price': today.low,
+          'currency': data.currency,
+          'date': dateKey,
+          'createdAt': createdAt,
+          'message':
+              '$symbol bu ayki en düşük değerine ulaştı: ${today.low.toStringAsFixed(4)} ${data.currency}',
+        },
+    ];
+    await notifications.addAll(items);
+    return items.length;
   }
 
   String _dateKey(DateTime d) =>

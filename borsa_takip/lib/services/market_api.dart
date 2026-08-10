@@ -162,32 +162,42 @@ class MarketApi {
     return token == null ? {} : {'Authorization': 'Bearer $token'};
   }
 
-  Future<Map<String, dynamic>> _get(Uri uri) async {
-    late final http.Response resp;
+  Future<Map<String, dynamic>> _get(Uri uri) =>
+      _sendWithAuthRetry(() => http.get(uri, headers: _authHeaders));
+
+  Future<Map<String, dynamic>> _post(Uri uri, Map<String, dynamic> body) => _sendWithAuthRetry(
+        () => http.post(
+          uri,
+          headers: {'Content-Type': 'application/json', ..._authHeaders},
+          body: jsonEncode(body),
+        ),
+      );
+
+  /// Supabase access token'ı süresi dolmuş olabilir (bkz. _authHeaders); bu
+  /// durumda proxy 401 döner. Kullanıcıya doğrudan bir hata göstermeden önce
+  /// oturumu bir kez yenileyip isteği tekrar deniyoruz — [send] her
+  /// çağrıldığında _authHeaders'ı yeniden okuduğundan (kapanış içinde), retry
+  /// otomatik olarak yenilenmiş token'ı kullanır.
+  Future<Map<String, dynamic>> _sendWithAuthRetry(
+    Future<http.Response> Function() send,
+  ) async {
+    http.Response resp;
     try {
-      resp = await http.get(uri, headers: _authHeaders);
+      resp = await send();
     } catch (e) {
       throw ApiException(
         'Proxy sunucusuna bağlanılamadı. "dart run bin/server.dart" '
         'komutunun proxy_server klasöründe çalıştığından emin olun.',
       );
     }
-    return _handle(resp);
-  }
-
-  Future<Map<String, dynamic>> _post(Uri uri, Map<String, dynamic> body) async {
-    late final http.Response resp;
-    try {
-      resp = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json', ..._authHeaders},
-        body: jsonEncode(body),
-      );
-    } catch (e) {
-      throw ApiException(
-        'Proxy sunucusuna bağlanılamadı. "dart run bin/server.dart" '
-        'komutunun proxy_server klasöründe çalıştığından emin olun.',
-      );
+    if (resp.statusCode == 401) {
+      try {
+        await Supabase.instance.client.auth.refreshSession();
+        resp = await send();
+      } catch (_) {
+        // Yenileme başarısız oldu; orijinal 401 yanıtıyla devam edip
+        // _handle'ın normal hata mesajını göstermesine izin ver.
+      }
     }
     return _handle(resp);
   }

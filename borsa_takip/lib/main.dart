@@ -9,6 +9,7 @@ import 'screens/notifications_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'services/market_api.dart';
 import 'services/supabase_config.dart';
+import 'theme/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,13 +25,84 @@ class BorsaTakipApp extends StatelessWidget {
     return MaterialApp(
       title: 'Borsa Takip',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
+      theme: _buildTheme(),
       home: const AuthGate(),
     );
   }
+}
+
+/// CLAUDE.md "UI/UX Tasarım Kuralları"nı uygulayan tek tema tanımı: renk
+/// (slate arka plan/kart/metin paleti), tipografi (başlıklarda semibold +
+/// sıkı tracking, ikincil metinlerde slate-500) ve kart görünümü (beyaz
+/// zemin, ince border, yumuşak gölge, rounded-xl). Ekranlar zaten
+/// `Theme.of(context).textTheme.titleMedium` gibi tema üzerinden okuduğundan
+/// bu tanım tek başına çoğu ekrana otomatik yansır; kart/boşluk gruplaması
+/// yine de her ekranın kendi layout'unda yapılmalı (bkz. home_screen.dart).
+ThemeData _buildTheme() {
+  const cardBorder = BorderSide(color: Color(0x80E2E8F0)); // slate-200 @ 80%
+  return ThemeData(
+    useMaterial3: true,
+    scaffoldBackgroundColor: AppColors.slate50,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: Colors.indigo,
+      surface: Colors.white,
+    ),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: AppColors.slate50,
+      foregroundColor: AppColors.slate900,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      titleTextStyle: TextStyle(
+        color: AppColors.slate900,
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.2,
+      ),
+    ),
+    textTheme: const TextTheme(
+      titleLarge: TextStyle(
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.2,
+        color: AppColors.slate900,
+      ),
+      titleMedium: TextStyle(
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.2,
+        color: AppColors.slate900,
+      ),
+      bodyMedium: TextStyle(color: AppColors.slate900),
+      bodySmall: TextStyle(color: AppColors.slate500),
+      labelSmall: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w500,
+        letterSpacing: 0.8,
+        color: AppColors.slate400,
+      ),
+    ),
+    cardTheme: const CardThemeData(
+      color: Colors.white,
+      elevation: 2,
+      shadowColor: Color(0x14000000), // shadow-sm karşılığı: çok soft siyah
+      surfaceTintColor: Colors.transparent,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        side: cardBorder,
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        side: const BorderSide(color: AppColors.slate200),
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    ),
+  );
 }
 
 /// Oturum durumuna göre giriş ekranı ile ana uygulama arasında geçiş yapar.
@@ -89,6 +161,21 @@ class _RootShellState extends State<RootShell> {
   // sekmeleri en baştan canlı tuttuğundan, her ekranın kendi başına ayrı ayrı
   // yüklemesi aralarında senkron kalmazdı.
   List<String> _favorites = [];
+
+  // IndexedStack tüm sekmeleri en baştan canlı tutuyor (favori senkronu bunu
+  // gerektiriyor, bkz. yukarısı), ama bu açılışta ziyaret edilmemiş
+  // sekmelerin bile initState'teki network çağrılarını hemen ateşlemesine
+  // yol açıyordu. Bunun yerine bir sekme sadece ilk ziyaret edildiğinde
+  // gerçek widget'ı ile değiştiriliyor; sonrasında IndexedStack'in normal
+  // state-koruma davranışı devam ediyor.
+  final Set<int> _visitedTabs = {0};
+
+  void _goToTab(int i) {
+    setState(() {
+      _index = i;
+      _visitedTabs.add(i);
+    });
+  }
 
   static const _titles = [
     'Grafik ve Aylık En Düşük Değerler',
@@ -152,6 +239,7 @@ class _RootShellState extends State<RootShell> {
       _chartRequestSymbol = symbol;
       _chartRequestId++;
       _index = 0;
+      _visitedTabs.add(0);
     });
   }
 
@@ -160,6 +248,7 @@ class _RootShellState extends State<RootShell> {
       _trackRequestSymbol = symbol;
       _trackRequestId++;
       _index = 3;
+      _visitedTabs.add(3);
     });
   }
 
@@ -179,30 +268,42 @@ class _RootShellState extends State<RootShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          HomeScreen(
-            requestedSymbol: _chartRequestSymbol,
-            requestId: _chartRequestId,
-            favorites: _favorites,
-          ),
-          NotificationsScreen(
-            onOpenChart: _openChartFor,
-            favorites: _favorites,
-            onToggleFavorite: _toggleFavorite,
-          ),
-          FavoritesScreen(
-            favorites: _favorites,
-            onToggleFavorite: _toggleFavorite,
-            onTrack: _openTrackingFor,
-          ),
-          TrackingScreen(
-            requestedSymbol: _trackRequestSymbol,
-            requestId: _trackRequestId,
-          ),
+          if (_visitedTabs.contains(0))
+            HomeScreen(
+              requestedSymbol: _chartRequestSymbol,
+              requestId: _chartRequestId,
+              favorites: _favorites,
+            )
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(1))
+            NotificationsScreen(
+              onOpenChart: _openChartFor,
+              favorites: _favorites,
+              onToggleFavorite: _toggleFavorite,
+            )
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(2))
+            FavoritesScreen(
+              favorites: _favorites,
+              onToggleFavorite: _toggleFavorite,
+              onTrack: _openTrackingFor,
+            )
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(3))
+            TrackingScreen(
+              requestedSymbol: _trackRequestSymbol,
+              requestId: _trackRequestId,
+            )
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _goToTab,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.show_chart), label: 'Grafik'),
           NavigationDestination(

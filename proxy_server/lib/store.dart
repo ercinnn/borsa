@@ -147,21 +147,32 @@ class NotificationStore {
   NotificationStore(SupabaseConfig config, http.Client client)
       : _table = SupabaseTable(client, config, 'notifications');
 
-  Future<bool> existsFor(String userId, String symbol, String dateKey) async {
+  /// Aynı sembol+tarih için her kullanıcıyı tek tek sorgulamak yerine tek
+  /// bir sorguda hangi kullanıcıların zaten bildirimi olduğunu döner (bkz.
+  /// MonthlyLowChecker._checkSymbol).
+  Future<Set<String>> existingUserIdsFor(
+    String symbol,
+    String dateKey,
+    List<String> userIds,
+  ) async {
+    if (userIds.isEmpty) return {};
     final rows = await _table.select(
-      columns: 'id',
+      columns: 'user_id',
       filters: {
-        'user_id': 'eq.$userId',
         'symbol': 'eq.$symbol',
         'date': 'eq.$dateKey',
-        'limit': '1',
+        'user_id': 'in.(${userIds.join(',')})',
       },
     );
-    return rows.isNotEmpty;
+    return rows.map((r) => r['user_id'] as String).toSet();
   }
 
-  Future<void> add(String userId, Map<String, dynamic> item) async {
-    await _table.insert({...item, 'user_id': userId}, prefer: 'return=minimal');
+  /// Birden fazla kullanıcı için tek bir bildirimi tek seferde ekler (bkz.
+  /// MonthlyLowChecker._checkSymbol) — her kullanıcı için ayrı bir insert
+  /// çağrısı yapmak yerine.
+  Future<void> addAll(List<Map<String, dynamic>> items) async {
+    if (items.isEmpty) return;
+    await _table.insert(items, prefer: 'return=minimal');
   }
 
   /// [category] verilirse ('bist', 'us' veya 'crypto') yalnızca o kategoriye

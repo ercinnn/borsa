@@ -304,3 +304,50 @@ adding a new interval rather than iterating `ChartInterval.values`.
   each other live) — a second device/tab, or the same app after a full
   reload, only sees the latest state from its own next `/api/favorites`
   fetch, not proactively.
+
+## UI/UX Tasarım Kuralları
+
+Bu proje Flutter/Material kullanıyor, Tailwind CSS yok (ne web'de ne
+başka bir yerde) — aşağıdaki kurallar orijinal Tailwind tabanlı bir
+tasarım sisteminin niyetini bu projenin gerçek araçlarına (Dart
+`TextStyle`/`EdgeInsets`/`ColorScheme`/widget'lar) çevirir. Her yeni
+ekran/bileşen ve mevcut bir ekrana dokunulan her revizyonda uygulanır;
+dokunulmayan ekranları geriye dönük güncellemek zorunlu değil ama o
+ekrana bir sonraki sefer dokunulduğunda bu kurallara çekilmeli.
+
+1. **Boşluklar (Spacing):** Sıkışık tasarımlara izin verme. Kart/konteyner
+   iç boşluğu minimum `EdgeInsets.all(24)` (Tailwind `p-6` karşılığı).
+   Elemanlar arası boşluk için `SizedBox(height: 16)`/`SizedBox(height: 24)`
+   ya da `Wrap(spacing: 16, runSpacing: 16)` (`gap-4`/`gap-6` karşılığı).
+2. **Renk sistemi:** Tailwind `slate` paletinin karşılıkları:
+   - Arka planlar: `Color(0xFFF8FAFC)` (`slate-50`) ya da
+     `Color(0xFFF1F5F9)` düşük opaklıkla (`slate-100/50`).
+   - Kartlar: beyaz zemin + `Border.all(color: Color(0xFFE2E8F0).withValues(alpha: 0.8))`
+     + `BorderRadius.circular(12)` + hafif gölge (`Card(elevation: 1)` ya da
+     `BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0,2))`) —
+     `bg-white border border-slate-200/80 shadow-sm rounded-xl` karşılığı.
+   - Metinler: ana başlıklar `Color(0xFF0F172A)` (`slate-900`), ikincil
+     metinler `Color(0xFF64748B)` (`slate-500`).
+   Bu renkleri her yerde tekrar yazmak yerine tek bir yerde (ör.
+   `lib/theme/app_colors.dart`) sabit olarak tanımlayıp oradan kullan.
+3. **Tipografi:** Başlıklarda `TextStyle(fontWeight: FontWeight.w600,
+   letterSpacing: -0.2)` (`font-semibold tracking-tight`); etiketlerde
+   `TextStyle(fontSize: 12, fontWeight: FontWeight.w500, letterSpacing: 0.8,
+   color: Color(0xFF94A3B8))` + metni `.toUpperCase()` ile büyük harfe
+   çevir (Flutter'da CSS `text-transform` karşılığı yok, string'i kendin
+   büyük harfe çevirmen gerekiyor) — `text-xs uppercase tracking-wider
+   text-slate-400 font-medium` karşılığı.
+4. **Etkileşimler:** Tıklanabilir her elemanı (buton, kart, link) `InkWell`/
+   `GestureDetector` ile sar; basılma anında hafif küçülme için
+   `AnimatedScale(scale: pressed ? 0.98 : 1.0, duration:
+   Duration(milliseconds: 150))`, hover'da gölge artışı için `MouseRegion`
+   + `AnimatedContainer(duration: Duration(milliseconds: 150))` kullan
+   (`transition-all duration-150 active:scale-[0.98] hover:shadow-md`
+   karşılığı). Web'de `InkWell`'in kendi hover/splash efekti zaten temel
+   bir geri bildirim verir, üstüne tam bu kuralı eklemek gerekmiyorsa en
+   azından `InkWell` kullanmayı atlama.
+5. **Layout ve hizalama:** Mevcut `Row`/`Column`/`Wrap`/`LayoutBuilder`
+   yapısını bozma (bkz. `candlestick_chart.dart`'taki responsive
+   `LayoutBuilder` kullanımı) — masaüstü ve mobil web'de aynı ekranın
+   düzgün göründüğünden emin ol, sabit genişlik/yükseklik yerine
+   `Expanded`/`Flexible`/`Wrap` tercih et.

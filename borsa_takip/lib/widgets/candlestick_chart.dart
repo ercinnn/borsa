@@ -20,6 +20,14 @@ class _CandlestickChartState extends State<CandlestickChart> {
   static const _popupWidth = 148.0;
 
   int? _selectedIndex;
+  double _minPrice = 0;
+  double _maxPrice = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _computePriceRange();
+  }
 
   @override
   void didUpdateWidget(covariant CandlestickChart oldWidget) {
@@ -28,7 +36,21 @@ class _CandlestickChartState extends State<CandlestickChart> {
     // kalacağından kapatılıyor.
     if (oldWidget.result != widget.result) {
       _selectedIndex = null;
+      _computePriceRange();
     }
+  }
+
+  // Sadece widget.result değiştiğinde çağrılır; bir muma tıklayıp popup
+  // açmak da build()'i yeniden çalıştırdığından, bu O(n) hesaplamayı her
+  // tıklamada tekrarlamamak için sonuç burada saklanıyor.
+  void _computePriceRange() {
+    final candles = widget.result.candles;
+    if (candles.isEmpty) return;
+    final rawMin = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
+    final rawMax = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    final pad = (rawMax - rawMin) * 0.08 == 0 ? 1.0 : (rawMax - rawMin) * 0.08;
+    _minPrice = rawMin - pad;
+    _maxPrice = rawMax + pad;
   }
 
   @override
@@ -37,12 +59,8 @@ class _CandlestickChartState extends State<CandlestickChart> {
     if (candles.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    final rawMin = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
-    final rawMax = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
-    final pad = (rawMax - rawMin) * 0.08 == 0 ? 1.0 : (rawMax - rawMin) * 0.08;
-    final minPrice = rawMin - pad;
-    final maxPrice = rawMax + pad;
+    final minPrice = _minPrice;
+    final maxPrice = _maxPrice;
 
     return Card(
       child: Padding(

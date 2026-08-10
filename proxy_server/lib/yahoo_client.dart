@@ -31,6 +31,27 @@ class ChartData {
   ChartData(this.currency, this.candles);
 }
 
+class _CacheEntry {
+  final ChartData data;
+  final DateTime expiresAt;
+  _CacheEntry(this.data, this.expiresAt);
+}
+
+/// Aynı sembol+aralık+interval için kısa süreli sonuç cache'i: aynı grafiği
+/// art arda açan kullanıcılar veya bir sonraki MonthlyLowChecker taraması
+/// Yahoo'ya tekrar gitmesin diye. Kişisel ölçekte bir süreç boyunca sınırsız
+/// büyümesin diye her çağrıda süresi dolmuş kayıtlar ayıklanıyor ve toplam
+/// boyut bir üst sınırın üstündeyse tamamen temizleniyor.
+final _cache = <String, _CacheEntry>{};
+const _cacheTtl = Duration(minutes: 2);
+const _cacheMaxEntries = 500;
+
+void _pruneCache() {
+  final now = DateTime.now();
+  _cache.removeWhere((_, entry) => entry.expiresAt.isBefore(now));
+  if (_cache.length > _cacheMaxEntries) _cache.clear();
+}
+
 /// Yahoo Finance chart uç noktasından ham mum verisi çeker ve ayrıştırır.
 /// Hem /api/candles hem de aylık dip kontrol servisi tarafından paylaşılır.
 Future<ChartData> fetchChart(
@@ -40,6 +61,13 @@ Future<ChartData> fetchChart(
   int period2,
   String interval,
 ) async {
+  final cacheKey = '$symbol|$period1|$period2|$interval';
+  _pruneCache();
+  final cached = _cache[cacheKey];
+  if (cached != null && cached.expiresAt.isAfter(DateTime.now())) {
+    return cached.data;
+  }
+
   final uri = Uri.https(
     'query1.finance.yahoo.com',
     '/v8/finance/chart/$symbol',
@@ -94,5 +122,7 @@ Future<ChartData> fetchChart(
     candles.add(RawCandle(date, open as num, high as num, low as num, close as num));
   }
 
-  return ChartData(meta['currency'] as String? ?? '', candles);
+  final data = ChartData(meta['currency'] as String? ?? '', candles);
+  _cache[cacheKey] = _CacheEntry(data, DateTime.now().add(_cacheTtl));
+  return data;
 }

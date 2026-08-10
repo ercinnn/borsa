@@ -5,8 +5,7 @@ import '../models/candle.dart';
 import '../models/interval.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
-import '../widgets/candle_table.dart';
-import '../widgets/candlestick_chart.dart';
+import '../widgets/chart_result_section.dart';
 import '../widgets/favorite_symbols_bar.dart';
 import '../widgets/symbol_search_field.dart';
 
@@ -137,77 +136,63 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Favoriler', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          FavoriteSymbolsBar(
-            symbols: [
-              for (final s in widget.favorites) MarketSymbol(symbol: s, name: s),
-            ],
-            selected: _selectedSymbol,
-            onSelect: _selectSymbol,
-          ),
-          const SizedBox(height: 16),
-          SymbolSearchField(api: _api, onSelect: _selectSymbol),
-          const SizedBox(height: 16),
-          Text('Zaman Aralığı', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final interval in ChartInterval.longTerm)
-                ChoiceChip(
-                  label: Text(interval.label),
-                  selected: _interval == interval,
-                  onSelected: (_) => _selectInterval(interval),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (_selectedSymbol != null)
-                Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
-              OutlinedButton.icon(
-                onPressed: _pickDateRange,
-                icon: const Icon(Icons.date_range),
-                label: Text(
-                  _dateRange == null
-                      ? 'Tarih aralığı seç'
-                      : '${_dateFormat.format(_dateRange!.start)} - '
-                          '${_dateFormat.format(_dateRange!.end)}',
-                ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Favoriler', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 16),
+                  FavoriteSymbolsBar(
+                    symbols: [
+                      for (final s in widget.favorites)
+                        MarketSymbol(symbol: s, name: s),
+                    ],
+                    selected: _selectedSymbol,
+                    onSelect: _selectSymbol,
+                  ),
+                  const SizedBox(height: 24),
+                  SymbolSearchField(api: _api, onSelect: _selectSymbol),
+                ],
               ),
-              ElevatedButton.icon(
-                onPressed: _selectedSymbol == null || _loading ? null : _fetch,
-                icon: const Icon(Icons.show_chart),
-                label: const Text('Getir'),
-              ),
-            ],
+            ),
           ),
           const SizedBox(height: 24),
-          if (_loading) const Center(child: CircularProgressIndicator()),
-          if (_error != null)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Zaman Aralığı', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 16),
+                  ChartResultSection(
+                    intervals: ChartInterval.longTerm,
+                    selectedInterval: _interval,
+                    onSelectInterval: _selectInterval,
+                    dateRange: _dateRange,
+                    dateFormat: _dateFormat,
+                    onPickDateRange: _pickDateRange,
+                    fetchLabel: 'Getir',
+                    fetchIcon: Icons.show_chart,
+                    onFetch: _selectedSymbol == null || _loading ? null : _fetch,
+                    loading: _loading,
+                    error: _error,
+                    result: _result,
+                    leadingActions: [
+                      if (_selectedSymbol != null)
+                        Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
+                    ],
+                  ),
+                ],
               ),
-              child: Text(_error!),
             ),
-          if (_result != null) ...[
-            CandlestickChart(result: _result!),
-            const SizedBox(height: 16),
-            CandleTable(result: _result!),
-          ],
+          ),
         ],
       ),
     );
