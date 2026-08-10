@@ -13,6 +13,7 @@ import '../lib/monthly_low_checker.dart';
 import '../lib/preset_lists.dart';
 import '../lib/store.dart';
 import '../lib/supabase_client.dart';
+import '../lib/technical_analysis.dart';
 import '../lib/yahoo_client.dart';
 
 final _httpClient = http.Client();
@@ -255,6 +256,40 @@ Future<Response> _candlesHandler(Request request) async {
   }
 }
 
+/// Investing.com'daki "Teknik Özet" sayfasına benzer bir analiz: Pivot
+/// Noktaları, Hareketli Ortalamalar (MA5..MA200) ve Teknik İndikatörler
+/// (RSI, STOCH, STOCHRSI, MACD, ATR, ADX, CCI, Highs/Lows, UO, ROC,
+/// Williams %R, Bull/Bear Power) + üç özet kutusu (bkz.
+/// lib/technical_analysis.dart). MA200 için yeterli geçmiş sağlansın diye
+/// ~500 takvim günü (tatil/hafta sonu boşluklarıyla BIST/ABD için ~250+ işlem
+/// günü) geriye gidiliyor. `/api/candles` gibi public — sembole özgü, kullanıcı
+/// verisi içermiyor.
+Future<Response> _technicalHandler(Request request) async {
+  final symbol = request.url.queryParameters['symbol'];
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
+  }
+
+  final now = DateTime.now().toUtc();
+  final period2 = now.millisecondsSinceEpoch ~/ 1000 + 86400;
+  final period1 =
+      now.subtract(const Duration(days: 500)).millisecondsSinceEpoch ~/ 1000;
+
+  try {
+    final data = await fetchChart(_httpClient, symbol, period1, period2, '1d');
+    final result = computeTechnicalAnalysis(symbol, data.currency, data.candles);
+    return _json(result.toJson());
+  } on YahooException catch (e) {
+    return _json({'error': e.message}, status: 404);
+  } on InsufficientDataException catch (e) {
+    return _json({'error': e.message}, status: 422);
+  } catch (e) {
+    stderr.writeln('Teknik analiz hatası: $e');
+    return _json({'error': 'Teknik analiz hesaplanırken bir hata oluştu.'},
+        status: 502);
+  }
+}
+
 class _AuthCacheEntry {
   final String userId;
   final DateTime expiresAt;
@@ -409,6 +444,33 @@ Future<Response> _favoritesRemoveHandler(
   return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
+Future<Response> _technicalWatchlistGetHandler(
+    Request request, String userId, TechnicalWatchlistStore technicalWatchlist) async {
+  return _json({'symbols': await technicalWatchlist.symbolsFor(userId)});
+}
+
+Future<Response> _technicalWatchlistAddHandler(
+    Request request, String userId, TechnicalWatchlistStore technicalWatchlist) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final added = await technicalWatchlist.add(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'added': added});
+}
+
+Future<Response> _technicalWatchlistRemoveHandler(
+    Request request, String userId, TechnicalWatchlistStore technicalWatchlist) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final removed = await technicalWatchlist.remove(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
+}
+
 Future<Response> _trackedGetHandler(
     Request request, String userId, TrackedSymbolStore tracked) async {
   return _json({'symbol': await tracked.getFor(userId)});
@@ -458,6 +520,7 @@ void main(List<String> args) async {
   final watchlist = WatchlistStore(supabaseConfig, _httpClient);
   final notifications = NotificationStore(supabaseConfig, _httpClient);
   final favorites = FavoritesStore(supabaseConfig, _httpClient);
+  final technicalWatchlist = TechnicalWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
@@ -507,6 +570,22 @@ void main(List<String> args) async {
     ..post(
       '/api/favorites/remove',
       _withAuth(supabaseConfig, (r, uid) => _favoritesRemoveHandler(r, uid, favorites)),
+    )
+    ..get('/api/technical', _technicalHandler)
+    ..get(
+      '/api/technical-watchlist',
+      _withAuth(supabaseConfig,
+          (r, uid) => _technicalWatchlistGetHandler(r, uid, technicalWatchlist)),
+    )
+    ..post(
+      '/api/technical-watchlist/add',
+      _withAuth(supabaseConfig,
+          (r, uid) => _technicalWatchlistAddHandler(r, uid, technicalWatchlist)),
+    )
+    ..post(
+      '/api/technical-watchlist/remove',
+      _withAuth(supabaseConfig,
+          (r, uid) => _technicalWatchlistRemoveHandler(r, uid, technicalWatchlist)),
     )
     ..get(
       '/api/tracked',

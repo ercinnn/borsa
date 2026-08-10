@@ -106,7 +106,8 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   Both `/api/candles` and the monthly-low checker call it — don't duplicate
   Yahoo-parsing logic elsewhere.
 - `store.dart` — `WatchlistStore`, `NotificationStore`, `FavoritesStore`,
-  `TrackedSymbolStore`, all persisted in a Supabase Postgres project via
+  `TrackedSymbolStore`, `TechnicalWatchlistStore`, all persisted in a
+  Supabase Postgres project via
   `supabase_client.dart` (a minimal PostgREST wrapper, not the official
   SDK). Multi-tenant: every method takes a `userId` and queries Supabase
   filtered to that user (no in-memory cache — a single-user leftover from
@@ -121,12 +122,16 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   the star toggle next to each watchlist symbol in Bildirimler); a symbol
   can be in either, both, or neither. `TrackedSymbolStore` holds one row per
   user (upserted, no history) for whichever symbol the Takip tab is
-  currently showing.
+  currently showing. `TechnicalWatchlistStore` is the same shape as
+  `FavoritesStore` again (own `technical_watchlist` table, no seeding, no
+  notification side-effects) — it's just which symbols the Teknik tab
+  currently analyzes; unrelated to `WatchlistStore`/`FavoritesStore`.
   Table schema: `proxy_server/supabase_schema.sql` +
-  `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` (run once
-  each, in order, in the Supabase SQL Editor — the second adds `user_id`
-  and RLS to the base tables, the third adds the `favorites` and
-  `tracked_symbol` tables). Requires `SUPABASE_URL` and
+  `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` +
+  `supabase_schema_technical.sql` (run once each, in order, in the Supabase
+  SQL Editor — the second adds `user_id` and RLS to the base tables, the
+  third adds the `favorites` and `tracked_symbol` tables, the fourth adds
+  `technical_watchlist`). Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -159,6 +164,25 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `COINGECKO_API_KEY` (`x-cg-demo-api-key` header, opt-in — see Deployment);
   if all retries fail and there's no cached result, the `crypto200` handler
   falls back to the static `cryptoFallbackSymbols` list rather than erroring.
+- `technical_analysis.dart` — `computeTechnicalAnalysis()` powers the Teknik
+  tab: Investing.com-style Pivot Points (classic formula off the *previous*
+  day's H/L/C), Simple+Exponential moving averages for
+  5/10/20/50/100/200 (row omitted/`null` if there isn't enough history yet —
+  matters for recently-listed symbols), and eleven directional indicators
+  (RSI(14), STOCH(9,6), STOCHRSI(14), MACD(12,26,9), ADX(14)+DI±, CCI(14),
+  Highs/Lows(14), UO(7/14/28), ROC(12), Williams %R(14), Bull/Bear
+  Power(13)) plus ATR(14) shown as a value only (volatility, not
+  directional — excluded from every Buy/Sell tally). Each row's Al/Sat/Nötr
+  threshold is the standard textbook convention for that indicator (not a
+  reverse-engineering of Investing.com's undisclosed algorithm — results
+  track it directionally but won't match exactly). The three summary boxes
+  (moving averages / indicators / overall) are a simple vote count — `score
+  = (buy - sell) / total`, thresholded into Güçlü Al/Al/Nötr/Sat/Güçlü Sat —
+  our own aggregation, again not Investing.com's. `_technicalHandler` in
+  `bin/server.dart` fetches ~500 calendar days of daily candles (enough
+  trading days for MA200 even with weekend/holiday gaps) and is public like
+  `/api/candles` (no per-user data); only the *list* of symbols to analyze
+  (`/api/technical-watchlist*`) is per-user and auth-gated.
 
 `GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
 as a target for Render's health check; `/api/*` routes are the wrong choice
@@ -175,13 +199,17 @@ chunks of 12, `4h` by fetching `60m` candles and grouping by wall-clock
 trading-hour/weekend gaps that fixed-size chunks would straddle),
 `watchlist` (GET/add/remove/bulk-add), `favorites` (GET/add/remove, same
 shape as `watchlist`), `tracked` (GET returns `{symbol}` or `{symbol:
-null}`, POST upserts it — backs the Takip tab), `notifications` (paginated,
-100/page, newest first), `notifications/check-now` (fire-and-forget — does
-NOT await the full scan, since a large watchlist can take minutes; guarded
-by a module-level `_checkInProgress` flag against overlapping runs). All
-`watchlist*`/`favorites*`/`tracked`/`notifications*` endpoints require
-`Authorization: Bearer <token>` (see Auth above); `search`/`candles`/
-`health` don't.
+null}`, POST upserts it — backs the Takip tab), `technical` (GET, params:
+`symbol` — public, returns a `TechnicalAnalysisResult`, see
+`technical_analysis.dart` above), `technical-watchlist` (GET/add/remove,
+same shape as `favorites` — which symbols the Teknik tab shows),
+`notifications` (paginated, 100/page, newest first),
+`notifications/check-now` (fire-and-forget — does NOT await the full scan,
+since a large watchlist can take minutes; guarded by a module-level
+`_checkInProgress` flag against overlapping runs). All
+`watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`notifications*`
+endpoints require `Authorization: Bearer <token>` (see Auth above);
+`search`/`candles`/`technical`/`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
 `Timer.periodic(Duration(hours: 24))` — this only fires while the process
@@ -192,10 +220,15 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of four tab screens behind a bottom `NavigationBar`:
+`IndexedStack` of five tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
-notification feed), `FavoritesScreen` (search + favorite list), and
-`TrackingScreen` (single-symbol intraday chart). Screens mostly own their
+notification feed), `FavoritesScreen` (search + favorite list),
+`TrackingScreen` (single-symbol intraday chart), and `TechnicalScreen`
+(Pivot Points/Moving Averages/Indicators + Buy-Sell summary for whatever
+symbols the user has added there — its own `TechnicalWatchlistStore`-backed
+list, independent of `HomeScreen`'s selection or the watchlist/favorites;
+see `technical_analysis.dart` in the backend section for the computation).
+Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an
 `onToggleFavorite` callback down to `HomeScreen`/`NotificationsScreen`/

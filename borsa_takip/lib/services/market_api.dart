@@ -7,6 +7,7 @@ import '../models/candle.dart';
 import '../models/interval.dart';
 import '../models/notification_item.dart';
 import '../models/symbol.dart';
+import '../models/technical_analysis.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -122,6 +123,44 @@ class MarketApi {
       symbol: resp['symbol'] as String,
       removed: resp['removed'] as bool? ?? false,
     );
+  }
+
+  Future<List<String>> getTechnicalWatchlist() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/technical-watchlist'));
+    return (resp['symbols'] as List).cast<String>();
+  }
+
+  Future<({String symbol, bool added})> addToTechnicalWatchlist(String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/technical-watchlist/add'),
+      {'symbol': symbol},
+    );
+    return (
+      symbol: resp['symbol'] as String,
+      added: resp['added'] as bool? ?? false,
+    );
+  }
+
+  Future<({String symbol, bool removed})> removeFromTechnicalWatchlist(
+      String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/technical-watchlist/remove'),
+      {'symbol': symbol},
+    );
+    return (
+      symbol: resp['symbol'] as String,
+      removed: resp['removed'] as bool? ?? false,
+    );
+  }
+
+  /// Pivot Noktaları, Hareketli Ortalamalar ve Teknik İndikatörler + özet
+  /// (bkz. models/technical_analysis.dart). `/api/candles` gibi auth
+  /// gerektirmez — sembole özgü, kullanıcı verisi içermez.
+  Future<TechnicalAnalysisResult> technicalAnalysis(String symbol) async {
+    final uri = Uri.parse('$_baseUrl/api/technical')
+        .replace(queryParameters: {'symbol': symbol});
+    final resp = await _get(uri);
+    return TechnicalAnalysisResult.fromJson(resp);
   }
 
   /// Takip sekmesinde gösterilen, kullanıcı başına kalıcı olarak saklanan

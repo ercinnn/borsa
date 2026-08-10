@@ -114,6 +114,45 @@ class FavoritesStore {
   }
 }
 
+/// Teknik sekmesinde kullanıcının analiz için eklediği semboller.
+/// FavoritesStore ile aynı desen: watchlist/favorites'ten bağımsız, bildirim
+/// üretmez — yalnızca hangi sembollerin Teknik sekmesinde gösterileceğini
+/// belirler.
+class TechnicalWatchlistStore {
+  final SupabaseTable _table;
+
+  TechnicalWatchlistStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'technical_watchlist');
+
+  Future<List<String>> symbolsFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'symbol',
+      filters: {'user_id': 'eq.$userId', 'order': 'symbol.asc'},
+    );
+    return rows.map((r) => r['symbol'] as String).toList();
+  }
+
+  Future<bool> add(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty) return false;
+    final inserted = await _table.insert(
+      {'user_id': userId, 'symbol': normalized},
+      onConflict: 'user_id,symbol',
+      prefer: 'resolution=ignore-duplicates,return=representation',
+    );
+    return inserted.isNotEmpty;
+  }
+
+  Future<bool> remove(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    final deleted = await _table.delete({
+      'user_id': 'eq.$userId',
+      'symbol': 'eq.$normalized',
+    });
+    return deleted.isNotEmpty;
+  }
+}
+
 /// Takip sekmesinde gösterilen, kullanıcı başına tek aktif sembol.
 class TrackedSymbolStore {
   final SupabaseTable _table;

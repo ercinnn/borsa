@@ -7,6 +7,7 @@ import 'screens/favorites_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'screens/technical_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'services/market_api.dart';
 import 'services/supabase_config.dart';
@@ -253,6 +254,7 @@ class _RootShellState extends State<RootShell> {
     'Bildirimler',
     'Favoriler',
     'Takip',
+    'Teknik',
   ];
 
   @override
@@ -370,6 +372,10 @@ class _RootShellState extends State<RootShell> {
             )
           else
             const SizedBox.shrink(),
+          if (_visitedTabs.contains(4))
+            const TechnicalScreen()
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -381,6 +387,7 @@ class _RootShellState extends State<RootShell> {
               icon: Icon(Icons.notifications), label: 'Bildirimler'),
           NavigationDestination(icon: Icon(Icons.star), label: 'Favoriler'),
           NavigationDestination(icon: Icon(Icons.insights), label: 'Takip'),
+          NavigationDestination(icon: Icon(Icons.query_stats), label: 'Teknik'),
         ],
       ),
     );
