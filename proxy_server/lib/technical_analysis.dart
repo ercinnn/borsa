@@ -32,13 +32,21 @@ extension SummarySignalJson on SummarySignal {
 /// analiz sitelerinde kullanılan standart bir "oy sayımı" yöntemidir —
 /// Investing.com'un birebir aynısı olduğu iddia edilmez.
 SummarySignal _summarize(int buy, int sell, int total) {
-  if (total == 0) return SummarySignal.neutral;
-  final score = (buy - sell) / total;
-  if (score >= 0.6) return SummarySignal.strongBuy;
-  if (score >= 0.2) return SummarySignal.buy;
-  if (score > -0.2) return SummarySignal.neutral;
-  if (score > -0.6) return SummarySignal.sell;
+  final score = _scoreOf(buy, sell, total) / 100;
+  if (score >= 0.8) return SummarySignal.strongBuy;
+  if (score >= 0.6) return SummarySignal.buy;
+  if (score > 0.4) return SummarySignal.neutral;
+  if (score > 0.2) return SummarySignal.sell;
   return SummarySignal.strongSell;
+}
+
+/// [buy]/[sell]/[total] oy sayımını 0-100 arası bir "alım puanına" çevirir:
+/// 50 tam nötr, 100 tüm sinyaller Al, 0 tüm sinyaller Sat. "Yorum (X/100)"
+/// butonundaki X buradan gelir (bkz. bin/server.dart _technicalHandler).
+int _scoreOf(int buy, int sell, int total) {
+  if (total == 0) return 50;
+  final ratio = (buy - sell) / total; // -1..1
+  return (50 + 50 * ratio).round().clamp(0, 100);
 }
 
 class PivotPoints {
@@ -101,16 +109,21 @@ class TechnicalSummary {
   final SummarySignal movingAverages;
   final SummarySignal indicators;
   final SummarySignal overall;
+  /// Hareketli ortalamalar + göstergelerin birleşik oy sayımından 0-100
+  /// arası "alım puanı" (bkz. `_scoreOf`) — "Yorum (X/100)" butonundaki X.
+  final int score;
   TechnicalSummary({
     required this.movingAverages,
     required this.indicators,
     required this.overall,
+    required this.score,
   });
 
   Map<String, dynamic> toJson() => {
         'movingAverages': movingAverages.json,
         'indicators': indicators.json,
         'overall': overall.json,
+        'score': score,
       };
 }
 
@@ -424,8 +437,10 @@ TechnicalAnalysisResult computeTechnicalAnalysis(
   }
   final maSummary = _summarize(maBuy, maSell, maTotal);
   final indSummary = _summarize(indBuy, indSell, indTotal);
-  final overallSummary =
-      _summarize(maBuy + indBuy, maSell + indSell, maTotal + indTotal);
+  final overallBuy = maBuy + indBuy;
+  final overallSell = maSell + indSell;
+  final overallTotal = maTotal + indTotal;
+  final overallSummary = _summarize(overallBuy, overallSell, overallTotal);
 
   return TechnicalAnalysisResult(
     symbol: symbol,
@@ -439,6 +454,7 @@ TechnicalAnalysisResult computeTechnicalAnalysis(
       movingAverages: maSummary,
       indicators: indSummary,
       overall: overallSummary,
+      score: _scoreOf(overallBuy, overallSell, overallTotal),
     ),
   );
 }

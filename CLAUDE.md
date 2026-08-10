@@ -178,7 +178,13 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   track it directionally but won't match exactly). The three summary boxes
   (moving averages / indicators / overall) are a simple vote count — `score
   = (buy - sell) / total`, thresholded into Güçlü Al/Al/Nötr/Sat/Güçlü Sat —
-  our own aggregation, again not Investing.com's. `_technicalHandler` in
+  our own aggregation, again not Investing.com's. The same vote count also
+  produces `TechnicalSummary.score` (0-100 via `_scoreOf`, 50 = neutral) —
+  this is the "Yorum (X/100)" button's X in `technical_screen.dart`, which
+  opens a dialog with a rule-based Turkish commentary paragraph
+  (`_generateCommentary()` — template sentences driven by the score tier,
+  short-vs-long-term moving-average agreement, and the RSI/MACD/ADX values;
+  no LLM call, this app has no AI dependency). `_technicalHandler` in
   `bin/server.dart` fetches ~500 calendar days of daily candles (enough
   trading days for MA200 even with weekend/holiday gaps) and is public like
   `/api/candles` (no per-user data); only the *list* of symbols to analyze

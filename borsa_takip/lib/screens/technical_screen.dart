@@ -383,6 +383,224 @@ Color _summaryColor(SummarySignal signal) => switch (signal) {
       SummarySignal.neutral => AppColors.slate400,
     };
 
+/// "Yorum (X/100)" butonundaki X puanına göre renk: düşük puan kırmızı
+/// tonlarından, orta puan gri (nötr), yüksek puan yeşil tonlarına geçer —
+/// kullanıcının istediği 8 kademeli skala (koyu kırmızı → kırmızı → turuncu
+/// → nötr/gri → açık sarı → sarı → açık yeşil → koyu yeşil).
+Color _scoreColor(int score) {
+  if (score < 18) return const Color(0xFF7F1D1D); // koyu kırmızı
+  if (score < 30) return AppColors.rose500; // kırmızı
+  if (score < 42) return const Color(0xFFF97316); // turuncu
+  if (score < 58) return AppColors.slate400; // nötr (gri)
+  if (score < 70) return const Color(0xFFFDE047); // açık sarı
+  if (score < 82) return const Color(0xFFF59E0B); // sarı
+  if (score < 90) return AppColors.emerald400; // açık yeşil
+  return const Color(0xFF059669); // koyu yeşil
+}
+
+IndicatorRow? _findIndicator(List<IndicatorRow> list, String name) {
+  for (final row in list) {
+    if (row.name == name) return row;
+  }
+  return null;
+}
+
+/// Tüm pivot/MA/gösterge hesaplarını tek bir doğal dil paragrafında
+/// sentezleyen kural-tabanlı "insansı" yorum — bir yapay zekaya bağlanmıyor,
+/// bu ekranda zaten hesaplanmış olan sinyallerden üretiliyor. Yatırım
+/// tavsiyesi değildir; her zaman bu uyarıyla biter.
+String _generateCommentary(TechnicalAnalysisResult r) {
+  final score = r.summary.score;
+  final sb = StringBuffer();
+
+  if (score >= 90) {
+    sb.write('${r.symbol} için teknik tablo oldukça güçlü görünüyor: '
+        'hesapladığımız hareketli ortalamaların ve göstergelerin büyük '
+        'çoğunluğu alım yönünde sinyal veriyor. ');
+  } else if (score >= 70) {
+    sb.write('${r.symbol} teknik olarak pozitif bir görünüm sergiliyor; '
+        'göstergelerin çoğu yükseliş yönünde hizalanmış durumda. ');
+  } else if (score >= 58) {
+    sb.write('${r.symbol} için tablo hafif pozitife eğimli: alım sinyali '
+        'veren göstergeler satım verenlere göre biraz daha ağır basıyor. ');
+  } else if (score > 42) {
+    sb.write('${r.symbol} şu an net bir yön vermiyor; alım ve satım '
+        'sinyalleri büyük ölçüde birbirini dengeliyor, kararsız/yatay bir '
+        'görünüm hakim. ');
+  } else if (score >= 30) {
+    sb.write('${r.symbol} için tablo hafif negatife eğimli: satım sinyali '
+        'veren göstergeler alım verenlere göre biraz daha ağır basıyor. ');
+  } else if (score >= 18) {
+    sb.write('${r.symbol} teknik olarak zayıf bir görünüm sergiliyor; '
+        'göstergelerin çoğu düşüş yönünde hizalanmış durumda. ');
+  } else {
+    sb.write('${r.symbol} için teknik tablo oldukça zayıf: hesapladığımız '
+        'hareketli ortalamaların ve göstergelerin büyük çoğunluğu satış '
+        'yönünde. ');
+  }
+
+  final shortTerm =
+      r.movingAverages.where((m) => m.period <= 20 && m.smaSignal != null).toList();
+  final longTerm =
+      r.movingAverages.where((m) => m.period >= 50 && m.smaSignal != null).toList();
+  if (shortTerm.isNotEmpty && longTerm.isNotEmpty) {
+    final shortBullish =
+        shortTerm.where((m) => m.smaSignal == Signal.buy).length > shortTerm.length / 2;
+    final longBullish =
+        longTerm.where((m) => m.smaSignal == Signal.buy).length > longTerm.length / 2;
+    if (shortBullish && !longBullish) {
+      sb.write('Kısa vadeli ortalamalar (MA5-MA20) toparlanma işareti '
+          'verirken uzun vadeli ortalamalar hâlâ zayıf — bu, olası bir '
+          'dip/tepki hareketine işaret edebilir. ');
+    } else if (!shortBullish && longBullish) {
+      sb.write('Kısa vadeli ortalamalar (MA5-MA20) zayıflık gösterirken '
+          'uzun vadeli ortalamalar (MA50 ve üzeri) hâlâ ana trendi yukarı '
+          'yönlü destekliyor — bu görünüm, ana yükseliş trendi içinde kısa '
+          'vadeli bir soluklanma/düzeltme olabileceğini düşündürüyor. ');
+    } else if (shortBullish && longBullish) {
+      sb.write('Kısa ve uzun vadeli hareketli ortalamaların neredeyse '
+          'tamamı aynı yönde (yukarı) hizalanmış, bu da trendin tutarlı '
+          'olduğuna işaret ediyor. ');
+    } else {
+      sb.write('Kısa ve uzun vadeli hareketli ortalamaların neredeyse '
+          'tamamı aynı yönde (aşağı) hizalanmış, bu da düşüş trendinin '
+          'tutarlı olduğuna işaret ediyor. ');
+    }
+  }
+
+  final rsi = _findIndicator(r.indicators, 'RSI(14)');
+  if (rsi != null) {
+    if (rsi.signal == Signal.buy) {
+      sb.write('RSI ${rsi.value.toStringAsFixed(0)} ile aşırı satım '
+          'bölgesine yakın seyrediyor; bu tür seviyeler tarihsel olarak '
+          'tepki alımlarının geldiği bölgeler olabiliyor. ');
+    } else if (rsi.signal == Signal.sell) {
+      sb.write('RSI ${rsi.value.toStringAsFixed(0)} ile aşırı alım '
+          'bölgesine yaklaşmış durumda; kısa vadede bir kâr satışı/düzeltme '
+          'riski artabilir. ');
+    } else {
+      sb.write('RSI ${rsi.value.toStringAsFixed(0)} ile nötr bölgede, ne '
+          'aşırı alım ne aşırı satım sinyali vermiyor. ');
+    }
+  }
+
+  final macd = _findIndicator(r.indicators, 'MACD(12,26)');
+  if (macd != null) {
+    sb.write(macd.signal == Signal.buy
+        ? 'MACD, sinyal çizgisinin üzerinde seyrederek momentumun yukarı '
+            'yönlü olduğunu destekliyor. '
+        : 'MACD, sinyal çizgisinin altında seyrederek momentumun '
+            'zayıflamaya başladığına işaret ediyor. ');
+  }
+
+  final adx = _findIndicator(r.indicators, 'ADX(14)');
+  if (adx != null) {
+    sb.write(adx.value > 25
+        ? 'ADX ${adx.value.toStringAsFixed(0)} ile 25 eşiğinin üzerinde '
+            'olduğundan mevcut trend güçlü/belirgin kabul edilebilir. '
+        : 'ADX ${adx.value.toStringAsFixed(0)} ile 25 eşiğinin altında '
+            'olduğundan piyasa şu an net bir trendden çok yatay/kararsız '
+            'bir seyir izliyor olabilir. ');
+  }
+
+  sb.write('\n\nGenel puanımız 100 üzerinden $score. ');
+  if (score >= 70) {
+    sb.write('Bu seviye, mevcut göstergelerin çoğunluğunun yukarı yönü '
+        'desteklediği anlamına geliyor.');
+  } else if (score <= 30) {
+    sb.write('Bu seviye, mevcut göstergelerin çoğunluğunun aşağı yönü '
+        'desteklediği anlamına geliyor.');
+  } else {
+    sb.write('Bu seviye, göstergeler arasında net bir üstünlük olmadığını, '
+        'fiyatın yön arayışında olabileceğini gösteriyor.');
+  }
+
+  sb.write('\n\nBu yorum, yukarıdaki teknik göstergelerin otomatik bir '
+      'sentezidir; bir yatırım tavsiyesi değildir.');
+
+  return sb.toString();
+}
+
+void _showCommentaryDialog(BuildContext context, TechnicalAnalysisResult result) {
+  final score = result.summary.score;
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: AppColors.slate900,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: AppColors.slate800.withValues(alpha: 0.8)),
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text('${result.symbol} · Yorum',
+                style: const TextStyle(
+                    color: AppColors.slate100, fontWeight: FontWeight.w700)),
+          ),
+          Text('$score/100',
+              style: GoogleFonts.robotoMono(
+                  color: _scoreColor(score), fontWeight: FontWeight.w800)),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Text(_generateCommentary(result),
+            style: const TextStyle(color: AppColors.slate100, height: 1.5)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Kapat'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// "Yorum (X/100)" butonu — Genel Özet kartında Nötr/Al/Sat rozetinin hemen
+/// solunda gösterilir. X, [_scoreColor]'a göre renklenir; uç noktalarda
+/// (çok düşük/çok yüksek puan) hafif bir "glow" gölgesiyle vurgulanır.
+class _CommentButton extends StatelessWidget {
+  final TechnicalAnalysisResult result;
+  const _CommentButton({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final score = result.summary.score;
+    final color = _scoreColor(score);
+    final glow = score >= 90 || score <= 18;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _showCommentaryDialog(context, result),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.slate900.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withValues(alpha: 0.6)),
+            boxShadow:
+                glow ? [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 14)] : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.chat_bubble_outline, size: 13, color: AppColors.slate400),
+              const SizedBox(width: 5),
+              const Text('Yorum ',
+                  style: TextStyle(
+                      color: AppColors.slate100, fontSize: 12, fontWeight: FontWeight.w600)),
+              Text('($score/100)',
+                  style: GoogleFonts.robotoMono(
+                      color: color, fontSize: 12, fontWeight: FontWeight.w800)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SignalBadge extends StatelessWidget {
   final String label;
   final Color color;
@@ -431,6 +649,8 @@ class _TechnicalResultView extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
+                  _CommentButton(result: result),
+                  const SizedBox(width: 8),
                   _SignalBadge(
                     label: result.summary.overall.label,
                     color: _summaryColor(result.summary.overall),

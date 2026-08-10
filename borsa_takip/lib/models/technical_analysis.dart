@@ -111,16 +111,21 @@ class TechnicalSummary {
   final SummarySignal movingAverages;
   final SummarySignal indicators;
   final SummarySignal overall;
+  /// Hareketli ortalamalar + göstergelerin birleşik oy sayımından 0-100
+  /// arası "alım puanı" — "Yorum (X/100)" butonundaki X.
+  final int score;
   const TechnicalSummary({
     required this.movingAverages,
     required this.indicators,
     required this.overall,
+    required this.score,
   });
 
   factory TechnicalSummary.fromJson(Map<String, dynamic> json) => TechnicalSummary(
         movingAverages: SummarySignal.fromJson(json['movingAverages'] as String?),
         indicators: SummarySignal.fromJson(json['indicators'] as String?),
         overall: SummarySignal.fromJson(json['overall'] as String?),
+        score: (json['score'] as num?)?.toInt() ?? 50,
       );
 }
 
