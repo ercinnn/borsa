@@ -5,6 +5,7 @@ import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/score_ranking_section.dart';
 import '../widgets/symbol_search_field.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -40,6 +41,12 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   late final TabController _categoryTabController;
   int _lastCategoryIndex = 0;
 
+  // İzleme Listesi (mevcut yönetim UI'ı) ile Puan Sıralaması (bkz.
+  // ScoreRankingSection) arasında geçiş; Bildirimler akışı bundan bağımsız,
+  // her zaman görünür kalır.
+  late final TabController _sectionTabController;
+  int _lastSectionIndex = 0;
+
   // BIST sembolleri ".IS", kripto sembolleri "-USD" ile bitiyor (bkz.
   // preset_lists.dart / coingecko_client.dart); geri kalan her şey ABD/diğer
   // sekmesinde toplanıyor. Sıra proxy_server'daki NotificationStore
@@ -72,6 +79,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     super.initState();
     _categoryTabController = TabController(length: 3, vsync: this)
       ..addListener(_onCategoryTabChanged);
+    _sectionTabController = TabController(length: 2, vsync: this)
+      ..addListener(_onSectionTabChanged);
     _loadWatchlist();
     _loadNotifications();
   }
@@ -84,9 +93,17 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     _loadNotifications(page: 1);
   }
 
+  void _onSectionTabChanged() {
+    if (_sectionTabController.indexIsChanging) return;
+    if (_sectionTabController.index == _lastSectionIndex) return;
+    _lastSectionIndex = _sectionTabController.index;
+    setState(() {});
+  }
+
   @override
   void dispose() {
     _categoryTabController.dispose();
+    _sectionTabController.dispose();
     super.dispose();
   }
 
@@ -215,84 +232,100 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               ),
               child: Text(_error!, style: const TextStyle(color: AppColors.slate100)),
             ),
-          Text('İzleme Listesi', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            'Aylık en düşük değerine ulaştığında bildirim almak istediğiniz '
-            'sembolleri buraya ekleyin (herhangi bir hisse, kripto veya '
-            'Amerikan borsası sembolü olabilir).',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          SymbolSearchField(api: _api, onSelect: _addSymbol),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _PresetButton(
-                label: 'BIST 100 Ekle',
-                loading: _bulkAddingPreset == 'bist100',
-                onPressed: () => _bulkAdd('bist100', 'BIST 100'),
-              ),
-              _PresetButton(
-                label: 'ABD Popüler 100 Ekle',
-                loading: _bulkAddingPreset == 'us100',
-                onPressed: () => _bulkAdd('us100', 'ABD Popüler 100'),
-              ),
-              _PresetButton(
-                label: 'Kripto İlk 200 Ekle',
-                loading: _bulkAddingPreset == 'crypto200',
-                onPressed: () => _bulkAdd('crypto200', 'Kripto İlk 200'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'BIST 100 ve ABD Popüler 100 listeleri düzenli aralıklarla '
-            'güncellenen sabit/küratörlü listelerdir (Yahoo\'nun canlı "en '
-            'çok işlem gören" verisi kimlik doğrulaması gerektirdiğinden '
-            'kullanılamıyor); Kripto İlk 200 ise CoinGecko\'dan piyasa '
-            'değerine göre canlı çekilir.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          if (_loadingWatchlist)
-            const Center(child: CircularProgressIndicator())
-          else ...[
-            Text('${_watchlist.length} sembol izleniyor',
-                style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 8),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: TabBar(
-                controller: _categoryTabController,
-                tabs: [
-                  Tab(text: 'BIST (${_bistSymbols.length})'),
-                  Tab(text: 'ABD (${_usSymbols.length})'),
-                  Tab(text: 'Kripto (${_cryptoSymbols.length})'),
-                ],
-              ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
+              borderRadius: BorderRadius.circular(8),
             ),
+            child: TabBar(
+              controller: _sectionTabController,
+              tabs: const [
+                Tab(text: 'İzleme Listesi'),
+                Tab(text: 'Puan Sıralaması'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_sectionTabController.index == 1)
+            const ScoreRankingSection()
+          else ...[
+            Text(
+              'Aylık en düşük değerine ulaştığında bildirim almak istediğiniz '
+              'sembolleri buraya ekleyin (herhangi bir hisse, kripto veya '
+              'Amerikan borsası sembolü olabilir).',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            SymbolSearchField(api: _api, onSelect: _addSymbol),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final s in _currentCategorySymbols)
-                  _WatchlistSymbolChip(
-                    symbol: s,
-                    isFavorite: widget.favorites.contains(s),
-                    onToggleFavorite: widget.onToggleFavorite == null
-                        ? null
-                        : () => widget.onToggleFavorite!(s),
-                    onRemove: () => _removeSymbol(s),
-                  ),
+                _PresetButton(
+                  label: 'BIST 100 Ekle',
+                  loading: _bulkAddingPreset == 'bist100',
+                  onPressed: () => _bulkAdd('bist100', 'BIST 100'),
+                ),
+                _PresetButton(
+                  label: 'ABD Popüler 100 Ekle',
+                  loading: _bulkAddingPreset == 'us100',
+                  onPressed: () => _bulkAdd('us100', 'ABD Popüler 100'),
+                ),
+                _PresetButton(
+                  label: 'Kripto İlk 200 Ekle',
+                  loading: _bulkAddingPreset == 'crypto200',
+                  onPressed: () => _bulkAdd('crypto200', 'Kripto İlk 200'),
+                ),
               ],
             ),
+            const SizedBox(height: 4),
+            Text(
+              'BIST 100 ve ABD Popüler 100 listeleri düzenli aralıklarla '
+              'güncellenen sabit/küratörlü listelerdir (Yahoo\'nun canlı "en '
+              'çok işlem gören" verisi kimlik doğrulaması gerektirdiğinden '
+              'kullanılamıyor); Kripto İlk 200 ise CoinGecko\'dan piyasa '
+              'değerine göre canlı çekilir.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            if (_loadingWatchlist)
+              const Center(child: CircularProgressIndicator())
+            else ...[
+              Text('${_watchlist.length} sembol izleniyor',
+                  style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 8),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: TabBar(
+                  controller: _categoryTabController,
+                  tabs: [
+                    Tab(text: 'BIST (${_bistSymbols.length})'),
+                    Tab(text: 'ABD (${_usSymbols.length})'),
+                    Tab(text: 'Kripto (${_cryptoSymbols.length})'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final s in _currentCategorySymbols)
+                    _WatchlistSymbolChip(
+                      symbol: s,
+                      isFavorite: widget.favorites.contains(s),
+                      onToggleFavorite: widget.onToggleFavorite == null
+                          ? null
+                          : () => widget.onToggleFavorite!(s),
+                      onRemove: () => _removeSymbol(s),
+                    ),
+                ],
+              ),
+            ],
           ],
           const SizedBox(height: 24),
           Row(

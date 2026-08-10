@@ -7,6 +7,7 @@ import '../models/technical_analysis.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../utils/price_format.dart';
+import '../utils/score_color.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/symbol_search_field.dart';
 
@@ -383,21 +384,6 @@ Color _summaryColor(SummarySignal signal) => switch (signal) {
       SummarySignal.neutral => AppColors.slate400,
     };
 
-/// "Yorum (X/100)" butonundaki X puanına göre renk: düşük puan kırmızı
-/// tonlarından, orta puan gri (nötr), yüksek puan yeşil tonlarına geçer —
-/// kullanıcının istediği 8 kademeli skala (koyu kırmızı → kırmızı → turuncu
-/// → nötr/gri → açık sarı → sarı → açık yeşil → koyu yeşil).
-Color _scoreColor(int score) {
-  if (score < 18) return const Color(0xFF7F1D1D); // koyu kırmızı
-  if (score < 30) return AppColors.rose500; // kırmızı
-  if (score < 42) return const Color(0xFFF97316); // turuncu
-  if (score < 58) return AppColors.slate400; // nötr (gri)
-  if (score < 70) return const Color(0xFFFDE047); // açık sarı
-  if (score < 82) return const Color(0xFFF59E0B); // sarı
-  if (score < 90) return AppColors.emerald400; // açık yeşil
-  return const Color(0xFF059669); // koyu yeşil
-}
-
 IndicatorRow? _findIndicator(List<IndicatorRow> list, String name) {
   for (final row in list) {
     if (row.name == name) return row;
@@ -540,7 +526,7 @@ void _showCommentaryDialog(BuildContext context, TechnicalAnalysisResult result)
           ),
           Text('$score/100',
               style: GoogleFonts.robotoMono(
-                  color: _scoreColor(score), fontWeight: FontWeight.w800)),
+                  color: scoreColor(score), fontWeight: FontWeight.w800)),
         ],
       ),
       content: SingleChildScrollView(
@@ -558,7 +544,7 @@ void _showCommentaryDialog(BuildContext context, TechnicalAnalysisResult result)
 }
 
 /// "Yorum (X/100)" butonu — Genel Özet kartında Nötr/Al/Sat rozetinin hemen
-/// solunda gösterilir. X, [_scoreColor]'a göre renklenir; uç noktalarda
+/// solunda gösterilir. X, [scoreColor]'a göre renklenir; uç noktalarda
 /// (çok düşük/çok yüksek puan) hafif bir "glow" gölgesiyle vurgulanır.
 class _CommentButton extends StatelessWidget {
   final TechnicalAnalysisResult result;
@@ -567,8 +553,8 @@ class _CommentButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final score = result.summary.score;
-    final color = _scoreColor(score);
-    final glow = score >= 90 || score <= 18;
+    final color = scoreColor(score);
+    final glow = scoreGlows(score);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(

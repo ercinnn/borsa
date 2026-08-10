@@ -164,6 +164,21 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `COINGECKO_API_KEY` (`x-cg-demo-api-key` header, opt-in — see Deployment);
   if all retries fail and there's no cached result, the `crypto200` handler
   falls back to the static `cryptoFallbackSymbols` list rather than erroring.
+- `technical_score_cache.dart` — `TechnicalScoreCache` powers the
+  Bildirimler tab's "Puan Sıralaması" sub-tab: same batching pattern as
+  `MonthlyLowChecker` (distinct symbols across all users' watchlists, 4 at a
+  time, 300ms pause between batches), but computes each symbol's Teknik
+  `TechnicalSummary.score` and holds it in an **in-memory** map (no
+  Supabase table — not worth persisting, and Render's free tier spins down
+  on idle anyway, wiping it on the next cold start regardless). Refreshed
+  once at startup and every 4 hours via `Timer.periodic` in `bin/server.dart`
+  (more often than `MonthlyLowChecker`'s 24h, since this cache is the only
+  copy and gets wiped on every cold start). `/api/technical-scores` reads
+  only from this cache (fast, no live Yahoo calls) and returns 404-free
+  empty pages for symbols not yet scored — `pendingCount` in the response
+  tells the frontend how many are still missing.
+  `/api/technical-scores/refresh` fire-and-forget triggers a rescan, same
+  `_checkInProgress`-style re-entrancy guard as `notifications/check-now`.
 - `technical_analysis.dart` — `computeTechnicalAnalysis()` powers the Teknik
   tab: Investing.com-style Pivot Points (classic formula off the *previous*
   day's H/L/C), Simple+Exponential moving averages for
@@ -228,7 +243,16 @@ stays alive, there's no OS-level scheduler.
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
 `IndexedStack` of five tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
-notification feed), `FavoritesScreen` (search + favorite list),
+notification feed — its watchlist-management area itself has two sub-tabs,
+"İzleme Listesi" (the existing add/remove/preset UI) and "Puan Sıralaması"
+(`widgets/score_ranking_section.dart`'s `ScoreRankingSection`, a
+self-contained `StatefulWidget` with its own `MarketApi()`: BIST/ABD/Kripto
+category filters that can be combined freely, ascending/descending sort by
+the Teknik score, and 50-symbols-per-page pagination — reads
+`/api/technical-scores`, which itself reads only from
+`TechnicalScoreCache`, see the backend section), while the notification
+feed below stays visible regardless of which sub-tab is selected),
+`FavoritesScreen` (search + favorite list),
 `TrackingScreen` (single-symbol intraday chart), and `TechnicalScreen`
 (Pivot Points/Moving Averages/Indicators + Buy-Sell summary for whatever
 symbols the user has added there — its own `TechnicalWatchlistStore`-backed

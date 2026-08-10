@@ -14,6 +14,7 @@ import '../lib/preset_lists.dart';
 import '../lib/store.dart';
 import '../lib/supabase_client.dart';
 import '../lib/technical_analysis.dart';
+import '../lib/technical_score_cache.dart';
 import '../lib/yahoo_client.dart';
 
 final _httpClient = http.Client();
@@ -290,6 +291,79 @@ Future<Response> _technicalHandler(Request request) async {
   }
 }
 
+// BIST sembolleri ".IS", kripto sembolleri "-USD" ile bitiyor (bkz.
+// preset_lists.dart / coingecko_client.dart) — NotificationStore.page'deki
+// aynı kural, burada bellekteki bir liste üzerinde filtrelemek için.
+String _categoryOf(String symbol) {
+  if (symbol.endsWith('.IS')) return 'bist';
+  if (symbol.endsWith('-USD')) return 'crypto';
+  return 'us';
+}
+
+const _scorePageSize = 50;
+
+/// Bildirimler sayfasındaki "Puan Sıralaması" sekmesi: kullanıcının izleme
+/// listesindeki sembolleri (kategori filtresi + kullanıcının seçtiği yön)
+/// [TechnicalScoreCache]'teki önbelleklenmiş puana göre sıralayıp 50'şerlik
+/// sayfalar halinde döner. Puanı henüz hesaplanmamış semboller (ör. arka
+/// plan taraması henüz oraya ulaşmadı) `pendingCount` ile ayrıca bildirilir,
+/// listede görünmez.
+Future<Response> _technicalScoresHandler(
+  Request request,
+  String userId,
+  WatchlistStore watchlist,
+  TechnicalScoreCache scoreCache,
+) async {
+  final params = request.url.queryParameters;
+  final categoriesParam = params['categories'];
+  final categories = (categoriesParam == null || categoriesParam.trim().isEmpty)
+      ? {'bist', 'us', 'crypto'}
+      : categoriesParam.split(',').map((s) => s.trim()).toSet();
+  final ascending = params['sort'] == 'asc';
+  final page = int.tryParse(params['page'] ?? '') ?? 1;
+  final safePage = page < 1 ? 1 : page;
+
+  final watchlistSymbols = await watchlist.symbolsFor(userId);
+  final filtered =
+      watchlistSymbols.where((s) => categories.contains(_categoryOf(s))).toList();
+
+  final scored = scoreCache.scoresFor(filtered);
+  scored.sort((a, b) =>
+      ascending ? a.score.compareTo(b.score) : b.score.compareTo(a.score));
+
+  final total = scored.length;
+  final totalPages = total == 0 ? 1 : (total / _scorePageSize).ceil();
+  final start = (safePage - 1) * _scorePageSize;
+  final pageItems = start >= total
+      ? const <ScoredSymbol>[]
+      : scored.sublist(start, (start + _scorePageSize).clamp(0, total));
+
+  return _json({
+    'items': pageItems.map((s) => s.toJson()).toList(),
+    'page': safePage,
+    'totalPages': totalPages,
+    'total': total,
+    'pendingCount': filtered.length - total,
+    'refreshing': scoreCache.isRefreshing,
+  });
+}
+
+Future<Response> _technicalScoresRefreshHandler(
+  Request request,
+  String userId,
+  TechnicalScoreCache scoreCache,
+) async {
+  if (scoreCache.isRefreshing) {
+    return _json({'started': false, 'message': 'Zaten devam eden bir hesaplama var.'});
+  }
+  // Tüm kullanıcıları kapsayan global bir tarama (istekten bağımsız arka
+  // planda çalışır); buton sadece bunu erkenden tetikler (bkz. _checkNowHandler).
+  scoreCache.refreshAll().catchError((e) {
+    stderr.writeln('Puan yenileme başarısız: $e');
+  });
+  return _json({'started': true, 'cachedCount': scoreCache.cachedCount});
+}
+
 class _AuthCacheEntry {
   final String userId;
   final DateTime expiresAt;
@@ -522,6 +596,7 @@ void main(List<String> args) async {
   final favorites = FavoritesStore(supabaseConfig, _httpClient);
   final technicalWatchlist = TechnicalWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
+  final technicalScoreCache = TechnicalScoreCache(_httpClient, watchlist);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
 
@@ -536,6 +611,19 @@ void main(List<String> args) async {
     checker.checkAll().catchError((e) {
       stderr.writeln('Aylık dip kontrolü başarısız: $e');
       return 0;
+    });
+  });
+
+  // Puan Sıralaması sekmesi için: açılışta bir kez, sonrasında 4 saatte bir
+  // arka planda yenilenir (bkz. technical_score_cache.dart — Render'ın
+  // ücretsiz planı hareketsizlikte durduğundan bu bellek soğuk başlangıçta
+  // sıfırlanır, bu yüzden günlük değil daha sık taranıyor).
+  technicalScoreCache.refreshAll().catchError((e) {
+    stderr.writeln('İlk puan hesaplaması başarısız: $e');
+  });
+  Timer.periodic(const Duration(hours: 4), (_) {
+    technicalScoreCache.refreshAll().catchError((e) {
+      stderr.writeln('Puan hesaplaması başarısız: $e');
     });
   });
 
@@ -586,6 +674,16 @@ void main(List<String> args) async {
       '/api/technical-watchlist/remove',
       _withAuth(supabaseConfig,
           (r, uid) => _technicalWatchlistRemoveHandler(r, uid, technicalWatchlist)),
+    )
+    ..get(
+      '/api/technical-scores',
+      _withAuth(supabaseConfig,
+          (r, uid) => _technicalScoresHandler(r, uid, watchlist, technicalScoreCache)),
+    )
+    ..post(
+      '/api/technical-scores/refresh',
+      _withAuth(supabaseConfig,
+          (r, uid) => _technicalScoresRefreshHandler(r, uid, technicalScoreCache)),
     )
     ..get(
       '/api/tracked',

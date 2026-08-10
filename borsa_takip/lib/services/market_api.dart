@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/candle.dart';
 import '../models/interval.dart';
 import '../models/notification_item.dart';
+import '../models/scored_symbol.dart';
 import '../models/symbol.dart';
 import '../models/technical_analysis.dart';
 
@@ -161,6 +162,36 @@ class MarketApi {
         .replace(queryParameters: {'symbol': symbol});
     final resp = await _get(uri);
     return TechnicalAnalysisResult.fromJson(resp);
+  }
+
+  /// Bildirimler sayfasındaki Puan Sıralaması sekmesi: izleme listesindeki
+  /// sembolleri [categories] ('bist'/'us'/'crypto' altkümesi) ile filtreleyip
+  /// puana göre sıralar (varsayılan yüksekten düşüğe), 50'şerlik sayfalar
+  /// halinde döner. Puanlar arka planda önceden hesaplanmış bir önbellekten
+  /// gelir (bkz. proxy_server/lib/technical_score_cache.dart) — bu yüzden
+  /// anlık değil, `refreshTechnicalScores()` ile tetiklenen son taramayı
+  /// yansıtır.
+  Future<ScoredSymbolPage> getTechnicalScores({
+    required Set<String> categories,
+    bool descending = true,
+    int page = 1,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/technical-scores').replace(
+      queryParameters: {
+        'categories': categories.join(','),
+        'sort': descending ? 'desc' : 'asc',
+        'page': '$page',
+      },
+    );
+    final resp = await _get(uri);
+    return ScoredSymbolPage.fromJson(resp);
+  }
+
+  /// Puan önbelleğinin arka planda yenilenmesini tetikler; sonucu beklemeden
+  /// döner (izleme listesi büyükse dakikalar sürebilir, bkz. `checkNow`).
+  Future<bool> refreshTechnicalScores() async {
+    final resp = await _post(Uri.parse('$_baseUrl/api/technical-scores/refresh'), {});
+    return resp['started'] as bool? ?? false;
   }
 
   /// Takip sekmesinde gösterilen, kullanıcı başına kalıcı olarak saklanan
