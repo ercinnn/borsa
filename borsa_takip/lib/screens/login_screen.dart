@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -135,23 +136,28 @@ class _LoginScreenState extends State<LoginScreen> {
                         : 'Hesabın yok mu? Kayıt ol',
                   ),
                 ),
-                const SizedBox(height: 8),
-                const Row(
-                  children: [
-                    Expanded(child: Divider()),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Text('veya'),
-                    ),
-                    Expanded(child: Divider()),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _loading ? null : _signInWithGoogle,
-                  icon: const Icon(Icons.login),
-                  label: const Text('Google ile Giriş Yap'),
-                ),
+                // Google OAuth redirectTo mantığı (bkz. _signInWithGoogle)
+                // Uri.base.toString() ile tarayıcı URL'sine dayanıyor;
+                // mobilde anlamsız olduğundan buton sadece web'de gösterilir.
+                if (kIsWeb) ...[
+                  const SizedBox(height: 8),
+                  const Row(
+                    children: [
+                      Expanded(child: Divider()),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('veya'),
+                      ),
+                      Expanded(child: Divider()),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _loading ? null : _signInWithGoogle,
+                    icon: const Icon(Icons.login),
+                    label: const Text('Google ile Giriş Yap'),
+                  ),
+                ],
               ],
             ),
           ),

@@ -54,6 +54,23 @@ flutter test                      # runs test/widget_test.dart
 browser after 3 tries") — always use `-d web-server` and open
 `http://localhost:5000` in a browser separately.
 
+Android APK (same `borsa_takip/` project, `android/` platform folder added
+alongside `web/`):
+```powershell
+flutter build apk --release --dart-define=API_BASE_URL=https://borsa-proxy.onrender.com
+```
+Output: `build/app/outputs/flutter-apk/app-release.apk`, sideload directly
+(no Play Store, no signing keystore set up — release build type falls back
+to the Flutter template's debug signing config, which is fine for personal
+installs but not for Play Store distribution). Google Sign-In is hidden on
+non-web platforms (`kIsWeb` check in `login_screen.dart`) since
+`signInWithOAuth`'s `redirectTo: Uri.base.toString()` is a web-only concept;
+email/password auth works identically on Android. `AndroidManifest.xml`
+needs its own explicit `<uses-permission android:name=
+"android.permission.INTERNET"/>` (the Flutter template only grants it in
+the debug-build manifest, not main) — already added, but worth remembering
+if `flutter create` ever regenerates that file.
+
 There is no combined build/lint/test script — the two projects are analyzed
 and tested independently as shown above.
 
