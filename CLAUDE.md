@@ -46,10 +46,13 @@ dart analyze .
 Frontend (`borsa_takip/`):
 ```powershell
 flutter pub get
-flutter run -d chrome --web-port=5000
+flutter run -d web-server --web-port=5000
 dart analyze lib
 flutter test                      # runs test/widget_test.dart
 ```
+`-d chrome` reliably fails to launch in this environment ("Failed to launch
+browser after 3 tries") — always use `-d web-server` and open
+`http://localhost:5000` in a browser separately.
 
 There is no combined build/lint/test script — the two projects are analyzed
 and tested independently as shown above.
@@ -68,6 +71,12 @@ and tested independently as shown above.
   `Get-Content` doesn't default to UTF-8 on this system. Prefer the Edit/Write
   tools for any file containing Turkish text; if you must shell out, pass
   `-Encoding utf8` explicitly on both read and write.
+- If `flutter run -d web-server` was left running and its browser tab/window
+  gets closed, a *new* tab pointing at `localhost:5000` connects to the same
+  orphaned DWDS debug session and the page hangs blank forever (module
+  loader logs "Injecting <script> tag" on a loop, never reaches "Starting
+  application from main method"). Fix: kill the `flutter run` process and
+  start it fresh, then open exactly one new tab against it.
 
 ## Architecture
 
@@ -113,6 +122,12 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   lists (`bist100Symbols`, `usPopular100Symbols`) and a live CoinGecko
   top-N-by-market-cap fetch, used by `/api/watchlist/bulk-add`.
 
+`GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
+as a target for Render's health check; `/api/*` routes are the wrong choice
+since the watchlist/notifications ones now require auth (see below) and
+Render marking the service unhealthy over 401s hangs a deploy for ~15
+minutes before failing it.
+
 Key endpoints (all under `/api/`, CORS-open, JSON in/out):
 `search`, `candles` (params: `symbol,start,end,interval` where interval is
 one of `1d/1wk/1mo/3mo/12mo` — `12mo` doesn't exist in Yahoo and is
@@ -120,7 +135,9 @@ synthesized server-side by grouping `1mo` candles in chunks of 12),
 `watchlist` (GET/add/remove/bulk-add), `notifications` (paginated, 100/page,
 newest first), `notifications/check-now` (fire-and-forget — does NOT await
 the full scan, since a large watchlist can take minutes; guarded by a
-module-level `_checkInProgress` flag against overlapping runs).
+module-level `_checkInProgress` flag against overlapping runs). All
+`watchlist*`/`notifications*` endpoints require `Authorization: Bearer
+<token>` (see Auth above); `search`/`candles`/`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
 `Timer.periodic(Duration(hours: 24))` — this only fires while the process
@@ -156,6 +173,37 @@ instead of scrolling.
 Candle "period" labels (e.g. `Q3 25`, `2024-2025`, `31.07.25`) are formatted
 server-side per interval — the frontend just displays `candle.period`
 as-is, it does no date formatting of its own for chart data.
+
+## Deployment
+
+- `borsa_takip` → **GitHub Pages** (`https://ercinnn.github.io/borsa/`), via
+  `.github/workflows/deploy-pages.yml`: builds on every push to `main` that
+  touches `borsa_takip/**`, with `--base-href /borsa/` and
+  `--dart-define=API_BASE_URL=<repo var>`. The repo variable `API_BASE_URL`
+  (Settings → Secrets and variables → Actions → Variables) must point at the
+  Render URL below.
+- `proxy_server` → **Render** (`https://borsa-proxy.onrender.com`), free web
+  service defined in `render.yaml` (Docker, AOT-compiled via the
+  `proxy_server/Dockerfile`). Needs `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+  set as env vars directly in the Render dashboard (Environment tab) —
+  `render.yaml` only declares the *names* (`sync: false`), never the values.
+  Free tier spins down after ~15 min idle; first request after that takes
+  30–50s.
+- **Auto-deploy is unreliable in practice**: Render's service has
+  Auto-Deploy set to "On Commit", but pushes to `main` have repeatedly *not*
+  triggered a new build. Always check the service's Events page after
+  pushing a `proxy_server` change, and use Manual Deploy → "Deploy latest
+  commit" if nothing started within a minute or two.
+- **`render.yaml` field edits don't sync to an existing service.** Changing
+  `healthCheckPath` (or other blueprint fields) in `render.yaml` and pushing
+  does not update the already-created Render service's settings — it must
+  also be edited by hand in Settings → Health Checks. This bit us for real:
+  the health check was still hitting `/api/watchlist` after that route
+  started requiring auth, so every deploy sat "waiting for health check" for
+  ~15 minutes and then failed (and a stale cached image from an earlier
+  build had been silently serving as "live" in the meantime, running old
+  pre-auth code with no `/health` route at all). Whenever a blueprint field
+  actually needs to change, edit it in both places.
 
 ## Known rough edges
 
