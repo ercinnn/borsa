@@ -44,6 +44,24 @@ Response _json(Object data, {int status = 200}) {
   );
 }
 
+/// Handler'ların çoğu (ör. `_watchlistGetHandler`, body `jsonDecode` çağrıları)
+/// kendi try/catch'ini yapmaz; bu son-çare middleware'i olmadan Supabase'in
+/// fırlattığı ham `Exception` (bkz. supabase_client.dart) veya bozuk bir JSON
+/// body'nin `FormatException`'ı client'a stack trace/iç detay olarak sızardı.
+Middleware _errorHandling() {
+  return (Handler innerHandler) {
+    return (Request request) async {
+      try {
+        return await innerHandler(request);
+      } catch (e, st) {
+        stderr.writeln('Beklenmeyen hata (${request.method} ${request.requestedUri}): $e\n$st');
+        return _json({'error': 'Sunucu hatası, lütfen daha sonra tekrar deneyin.'},
+            status: 500);
+      }
+    };
+  };
+}
+
 Future<Response> _searchHandler(Request request) async {
   final q = request.url.queryParameters['q'];
   if (q == null || q.trim().isEmpty) {
@@ -79,7 +97,8 @@ Future<Response> _searchHandler(Request request) async {
         .toList();
     return _json({'results': results});
   } catch (e) {
-    return _json({'error': 'Arama sırasında hata: $e'}, status: 502);
+    stderr.writeln('Arama hatası: $e');
+    return _json({'error': 'Arama sırasında bir hata oluştu.'}, status: 502);
   }
 }
 
@@ -231,7 +250,8 @@ Future<Response> _candlesHandler(Request request) async {
   } on YahooException catch (e) {
     return _json({'error': e.message}, status: 404);
   } catch (e) {
-    return _json({'error': 'Veri alınırken hata: $e'}, status: 502);
+    stderr.writeln('Candle verisi alınırken hata: $e');
+    return _json({'error': 'Veri alınırken bir hata oluştu.'}, status: 502);
   }
 }
 
@@ -276,7 +296,7 @@ Future<Response> _watchlistAddHandler(
     return _json({'error': 'symbol gerekli'}, status: 400);
   }
   final added = await watchlist.add(userId, symbol);
-  return _json({'symbols': await watchlist.symbolsFor(userId), 'added': added});
+  return _json({'symbol': symbol.trim().toUpperCase(), 'added': added});
 }
 
 Future<Response> _watchlistRemoveHandler(
@@ -289,7 +309,7 @@ Future<Response> _watchlistRemoveHandler(
     return _json({'error': 'symbol gerekli'}, status: 400);
   }
   final removed = await watchlist.remove(userId, symbol);
-  return _json({'symbols': await watchlist.symbolsFor(userId), 'removed': removed});
+  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
 Future<Response> _watchlistBulkAddHandler(
@@ -344,7 +364,7 @@ Future<Response> _favoritesAddHandler(
     return _json({'error': 'symbol gerekli'}, status: 400);
   }
   final added = await favorites.add(userId, symbol);
-  return _json({'symbols': await favorites.symbolsFor(userId), 'added': added});
+  return _json({'symbol': symbol.trim().toUpperCase(), 'added': added});
 }
 
 Future<Response> _favoritesRemoveHandler(
@@ -357,7 +377,7 @@ Future<Response> _favoritesRemoveHandler(
     return _json({'error': 'symbol gerekli'}, status: 400);
   }
   final removed = await favorites.remove(userId, symbol);
-  return _json({'symbols': await favorites.symbolsFor(userId), 'removed': removed});
+  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
 Future<Response> _trackedGetHandler(
@@ -457,8 +477,10 @@ void main(List<String> args) async {
     ..post('/api/notifications/check-now',
         (r) => _checkNowHandler(r, checker, watchlist, supabaseConfig));
 
-  final handler =
-      const Pipeline().addMiddleware(_cors()).addHandler(router.call);
+  final handler = const Pipeline()
+      .addMiddleware(_cors())
+      .addMiddleware(_errorHandling())
+      .addHandler(router.call);
 
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
   final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);

@@ -108,9 +108,13 @@ class _RootShellState extends State<RootShell> {
       final list = await _api.getFavorites();
       if (!mounted) return;
       setState(() => _favorites = list);
-    } catch (_) {
-      // Sessiz geç: sekmeler favoriler olmadan da açılabilir, kullanıcı
-      // Favoriler sekmesinde tekrar deneyebilir.
+    } catch (e) {
+      // Sekmeler favoriler olmadan da açılabilir, ama kullanıcı en azından
+      // neden boş göründüğünü bilsin (bkz. _toggleFavorite'teki aynı desen).
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Favoriler yüklenemedi: $e')),
+      );
     }
   }
 
@@ -118,11 +122,20 @@ class _RootShellState extends State<RootShell> {
     final normalized = symbol.trim().toUpperCase();
     final isFavorite = _favorites.contains(normalized);
     try {
-      final updated = isFavorite
-          ? await _api.removeFromFavorites(normalized)
-          : await _api.addToFavorites(normalized);
-      if (!mounted) return;
-      setState(() => _favorites = updated);
+      if (isFavorite) {
+        final result = await _api.removeFromFavorites(normalized);
+        if (!mounted) return;
+        if (result.removed) {
+          setState(() =>
+              _favorites = _favorites.where((s) => s != result.symbol).toList());
+        }
+      } else {
+        final result = await _api.addToFavorites(normalized);
+        if (!mounted) return;
+        if (result.added && !_favorites.contains(result.symbol)) {
+          setState(() => _favorites = [..._favorites, result.symbol]..sort());
+        }
+      }
     } catch (e) {
       // Önceden burada hata sessizce yutuluyordu; kullanıcıya hiçbir şey
       // olmamış gibi görünüyordu (ör. favorites tablosu Supabase'de henüz

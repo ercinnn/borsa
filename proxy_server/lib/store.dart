@@ -166,44 +166,43 @@ class NotificationStore {
 
   /// [category] verilirse ('bist', 'us' veya 'crypto') yalnızca o kategoriye
   /// giren sembollerin bildirimleri sayfalanır (frontend'deki İzleme Listesi
-  /// alt sekmeleriyle aynı .IS/-USD sonek kuralı kullanılır).
+  /// alt sekmeleriyle aynı .IS/-USD sonek kuralı, PostgREST like/not.like
+  /// filtreleriyle DB tarafında uygulanır — tüm tabloyu çekip bellekte
+  /// filtrelemek yerine).
   Future<Map<String, dynamic>> page(
     String userId,
     int page, {
     int pageSize = 100,
     String? category,
   }) async {
-    final rows = await _table.select(
-      filters: {'user_id': 'eq.$userId', 'order': 'createdAt.desc'},
-    );
-    final items = category == null
-        ? rows
-        : rows.where((n) => _categoryOf(n['symbol'] as String) == category).toList();
-
     final safePage = page < 1 ? 1 : page;
-    final total = items.length;
-    final totalPages = total == 0 ? 1 : (total / pageSize).ceil();
     final start = (safePage - 1) * pageSize;
-    if (start >= total) {
-      return {
-        'notifications': [],
-        'page': safePage,
-        'totalPages': totalPages,
-        'total': total,
-      };
+
+    final filters = <String, String>{
+      'user_id': 'eq.$userId',
+      'order': 'createdAt.desc',
+      'limit': '$pageSize',
+      'offset': '$start',
+    };
+    switch (category) {
+      case 'bist':
+        filters['symbol'] = 'like.*.IS';
+        break;
+      case 'crypto':
+        filters['symbol'] = 'like.*-USD';
+        break;
+      case 'us':
+        filters['and'] = '(symbol.not.like.*.IS,symbol.not.like.*-USD)';
+        break;
     }
-    final end = (start + pageSize > total) ? total : start + pageSize;
+
+    final result = await _table.selectWithCount(filters: filters);
+    final totalPages = result.total == 0 ? 1 : (result.total / pageSize).ceil();
     return {
-      'notifications': items.sublist(start, end),
+      'notifications': result.rows,
       'page': safePage,
       'totalPages': totalPages,
-      'total': total,
+      'total': result.total,
     };
-  }
-
-  static String _categoryOf(String symbol) {
-    if (symbol.endsWith('.IS')) return 'bist';
-    if (symbol.endsWith('-USD')) return 'crypto';
-    return 'us';
   }
 }

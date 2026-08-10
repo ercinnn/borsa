@@ -41,6 +41,27 @@ class SupabaseTable {
     return (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
   }
 
+  /// [select] ile aynı, ama `Prefer: count=exact` ile PostgREST'in
+  /// `Content-Range` header'ından toplam satır sayısını da döner — sayfalama
+  /// için tüm tabloyu çekip bellekte saymak yerine bunu kullan.
+  Future<({List<Map<String, dynamic>> rows, int total})> selectWithCount({
+    String columns = '*',
+    Map<String, String> filters = const {},
+  }) async {
+    final resp = await client.get(
+      _uri({'select': columns, ...filters}),
+      headers: {..._headers, 'Prefer': 'count=exact'},
+    );
+    if (resp.statusCode != 200 && resp.statusCode != 206) {
+      throw Exception('Supabase select hatası ($table, ${resp.statusCode}): ${resp.body}');
+    }
+    final rows = (jsonDecode(resp.body) as List).cast<Map<String, dynamic>>();
+    final contentRange = resp.headers['content-range'];
+    final totalStr = contentRange?.split('/').last;
+    final total = totalStr == null ? rows.length : int.tryParse(totalStr) ?? rows.length;
+    return (rows: rows, total: total);
+  }
+
   /// [rowOrRows] tek bir Map veya Map listesi olabilir (toplu ekleme).
   /// Varsayılan `return=representation` ile eklenen satırları döner —
   /// çağıran taraf, "gerçekten eklendi mi" bilgisini (ör. ignore-duplicates

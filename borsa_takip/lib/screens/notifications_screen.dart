@@ -130,9 +130,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   Future<void> _addSymbol(MarketSymbol symbol) async {
     try {
-      final list = await _api.addToWatchlist(symbol.symbol);
+      final result = await _api.addToWatchlist(symbol.symbol);
       if (!mounted) return;
-      setState(() => _watchlist = list);
+      if (result.added && !_watchlist.contains(result.symbol)) {
+        setState(() => _watchlist = [..._watchlist, result.symbol]..sort());
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -141,9 +143,12 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   Future<void> _removeSymbol(String symbol) async {
     try {
-      final list = await _api.removeFromWatchlist(symbol);
+      final result = await _api.removeFromWatchlist(symbol);
       if (!mounted) return;
-      setState(() => _watchlist = list);
+      if (result.removed) {
+        setState(() =>
+            _watchlist = _watchlist.where((s) => s != result.symbol).toList());
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -153,11 +158,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   Future<void> _bulkAdd(String preset, String label) async {
     setState(() => _bulkAddingPreset = preset);
     try {
-      final added = await _api.bulkAddToWatchlist(preset);
-      await _loadWatchlist();
+      // Backend bulk-add yanıtında güncel tam listeyi de döndürüyor; ayrı bir
+      // _loadWatchlist() çağrısıyla aynı veriyi ikinci kez sormaya gerek yok.
+      final result = await _api.bulkAddToWatchlist(preset);
       if (!mounted) return;
+      setState(() => _watchlist = result.symbols);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$label: $added yeni sembol eklendi.')),
+        SnackBar(content: Text('$label: ${result.added} yeni sembol eklendi.')),
       );
     } catch (e) {
       if (!mounted) return;

@@ -56,30 +56,45 @@ class MarketApi {
     return (resp['symbols'] as List).cast<String>();
   }
 
-  Future<List<String>> addToWatchlist(String symbol) async {
+  /// Eklenen sembolün normalize edilmiş (trim+uppercase) hali ve gerçekten
+  /// eklenip eklenmediği döner; artık backend'in tam listeyi tekrar Supabase'e
+  /// sorup döndürmesine gerek kalmasın diye çağıran taraf yerel listesine bu
+  /// ikisiyle kendisi ekliyor (bkz. notifications_screen.dart _addSymbol).
+  Future<({String symbol, bool added})> addToWatchlist(String symbol) async {
     final resp = await _post(
       Uri.parse('$_baseUrl/api/watchlist/add'),
       {'symbol': symbol},
     );
-    return (resp['symbols'] as List).cast<String>();
+    return (
+      symbol: resp['symbol'] as String,
+      added: resp['added'] as bool? ?? false,
+    );
   }
 
-  Future<List<String>> removeFromWatchlist(String symbol) async {
+  Future<({String symbol, bool removed})> removeFromWatchlist(String symbol) async {
     final resp = await _post(
       Uri.parse('$_baseUrl/api/watchlist/remove'),
       {'symbol': symbol},
     );
-    return (resp['symbols'] as List).cast<String>();
+    return (
+      symbol: resp['symbol'] as String,
+      removed: resp['removed'] as bool? ?? false,
+    );
   }
 
-  /// preset: 'bist100', 'us100' veya 'crypto200'. Eklenen sembol sayısını
-  /// döndürür.
-  Future<int> bulkAddToWatchlist(String preset) async {
+  /// preset: 'bist100', 'us100' veya 'crypto200'. Backend zaten bulk-add
+  /// sonrası güncel tam listeyi döndürüyor (bkz. bin/server.dart
+  /// _watchlistBulkAddHandler); çağıran taraf bunu doğrudan kullanmalı,
+  /// ayrıca bir getWatchlist() ile tekrar sorgulamamalı.
+  Future<({int added, List<String> symbols})> bulkAddToWatchlist(String preset) async {
     final resp = await _post(
       Uri.parse('$_baseUrl/api/watchlist/bulk-add'),
       {'preset': preset},
     );
-    return resp['added'] as int;
+    return (
+      added: resp['added'] as int,
+      symbols: (resp['symbols'] as List).cast<String>(),
+    );
   }
 
   Future<List<String>> getFavorites() async {
@@ -87,20 +102,26 @@ class MarketApi {
     return (resp['symbols'] as List).cast<String>();
   }
 
-  Future<List<String>> addToFavorites(String symbol) async {
+  Future<({String symbol, bool added})> addToFavorites(String symbol) async {
     final resp = await _post(
       Uri.parse('$_baseUrl/api/favorites/add'),
       {'symbol': symbol},
     );
-    return (resp['symbols'] as List).cast<String>();
+    return (
+      symbol: resp['symbol'] as String,
+      added: resp['added'] as bool? ?? false,
+    );
   }
 
-  Future<List<String>> removeFromFavorites(String symbol) async {
+  Future<({String symbol, bool removed})> removeFromFavorites(String symbol) async {
     final resp = await _post(
       Uri.parse('$_baseUrl/api/favorites/remove'),
       {'symbol': symbol},
     );
-    return (resp['symbols'] as List).cast<String>();
+    return (
+      symbol: resp['symbol'] as String,
+      removed: resp['removed'] as bool? ?? false,
+    );
   }
 
   /// Takip sekmesinde gösterilen, kullanıcı başına kalıcı olarak saklanan

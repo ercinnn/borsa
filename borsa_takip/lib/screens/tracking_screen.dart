@@ -53,7 +53,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
       // initState içinde setState çağrılamayacağından (widget henüz build
       // edilmedi), fetch ve kalıcı-kayıt ilk frame sonrasına erteleniyor.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _api.setTrackedSymbol(widget.requestedSymbol!.symbol).catchError((_) {});
+        _api.setTrackedSymbol(widget.requestedSymbol!.symbol).catchError((e) {
+          debugPrint('Takip edilen sembol kaydedilemedi: $e');
+        });
         _fetch();
       });
     } else {
@@ -68,7 +70,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
     if (widget.requestId == _handledRequestId) return;
     _handledRequestId = widget.requestId;
     setState(() => _selectedSymbol = widget.requestedSymbol);
-    _api.setTrackedSymbol(widget.requestedSymbol!.symbol).catchError((_) {});
+    _api.setTrackedSymbol(widget.requestedSymbol!.symbol).catchError((e) {
+      debugPrint('Takip edilen sembol kaydedilemedi: $e');
+    });
     _fetch();
   }
 
@@ -80,9 +84,13 @@ class _TrackingScreenState extends State<TrackingScreen> {
         setState(() => _selectedSymbol = MarketSymbol(symbol: symbol, name: symbol));
         _fetch();
       }
-    } catch (_) {
-      // Sessiz geç: kalıcı sembol yüklenemezse kullanıcı Favoriler'den
-      // manuel seçebilir.
+    } catch (e) {
+      // Kullanıcı Favoriler'den manuel seçebilir, ama en azından neden boş
+      // göründüğünü bilsin.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Kaydedilmiş sembol yüklenemedi: $e')),
+      );
     } finally {
       if (mounted) setState(() => _loadingPersisted = false);
     }
