@@ -35,11 +35,16 @@ class MarketApi {
     return results.map(MarketSymbol.fromJson).toList();
   }
 
+  /// [includeIndicators] `true` ise her mumda RSI(14)/MACD(12,26,9) zaman
+  /// serisi de gelir (bkz. models/candle.dart, mum grafiğinin altındaki
+  /// RSI/MACD paneli için) — gereksiz hesaplama/veri olmasın diye
+  /// varsayılan `false`.
   Future<CandleResult> candles({
     required String symbol,
     required DateTime start,
     required DateTime end,
     required ChartInterval interval,
+    bool includeIndicators = false,
   }) async {
     final uri = Uri.parse('$_baseUrl/api/candles').replace(
       queryParameters: {
@@ -47,6 +52,7 @@ class MarketApi {
         'start': _formatDate(start),
         'end': _formatDate(end),
         'interval': interval.apiValue,
+        if (includeIndicators) 'indicators': 'rsi,macd',
       },
     );
     final resp = await _get(uri);

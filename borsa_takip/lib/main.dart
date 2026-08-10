@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/symbol.dart';
+import 'screens/comparison_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -255,6 +256,7 @@ class _RootShellState extends State<RootShell> {
     'Favoriler',
     'Takip',
     'Teknik',
+    'Karşılaştır',
   ];
 
   @override
@@ -376,6 +378,10 @@ class _RootShellState extends State<RootShell> {
             const TechnicalScreen()
           else
             const SizedBox.shrink(),
+          if (_visitedTabs.contains(5))
+            const ComparisonScreen()
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -388,6 +394,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.star), label: 'Favoriler'),
           NavigationDestination(icon: Icon(Icons.insights), label: 'Takip'),
           NavigationDestination(icon: Icon(Icons.query_stats), label: 'Teknik'),
+          NavigationDestination(icon: Icon(Icons.compare_arrows), label: 'Karşılaştır'),
         ],
       ),
     );

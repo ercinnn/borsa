@@ -124,6 +124,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
         start: range.start,
         end: range.end,
         interval: _interval,
+        includeIndicators: true,
       );
       if (!mounted) return;
       setState(() {

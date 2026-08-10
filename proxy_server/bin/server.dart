@@ -244,6 +244,33 @@ Future<Response> _candlesHandler(Request request) async {
       }
     }
 
+    // TradingView tarzı RSI/MACD paneli (bkz. borsa_takip'te
+    // widgets/candlestick_chart.dart): `indicators=rsi,macd` verilirse,
+    // (grup/senteleme sonrası) gösterilen aynı mum serisi üzerinden tam
+    // zaman serisi hesaplanıp her muma eklenir — Teknik sekmesindeki
+    // computeTechnicalAnalysis yalnızca son değerle ilgilenirken, burada
+    // grafiğin tamamı için gerekiyor (bkz. technical_analysis.dart
+    // rsiSeries/macdSeriesFor).
+    final indicatorsParam = params['indicators'];
+    if (indicatorsParam != null && indicatorsParam.trim().isNotEmpty && candles.isNotEmpty) {
+      final wanted = indicatorsParam.split(',').map((s) => s.trim()).toSet();
+      final closes = [for (final c in candles) (c['close'] as num).toDouble()];
+      if (wanted.contains('rsi')) {
+        final rsi = rsiSeries(closes);
+        for (var i = 0; i < candles.length; i++) {
+          candles[i]['rsi'] = rsi[i];
+        }
+      }
+      if (wanted.contains('macd')) {
+        final macd = macdSeriesFor(closes);
+        for (var i = 0; i < candles.length; i++) {
+          candles[i]['macd'] = macd.macd[i];
+          candles[i]['macdSignal'] = macd.signal[i];
+          candles[i]['macdHistogram'] = macd.histogram[i];
+        }
+      }
+    }
+
     return _json({
       'symbol': symbol,
       'currency': data.currency,
@@ -596,7 +623,8 @@ void main(List<String> args) async {
   final favorites = FavoritesStore(supabaseConfig, _httpClient);
   final technicalWatchlist = TechnicalWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
-  final technicalScoreCache = TechnicalScoreCache(_httpClient, watchlist);
+  final technicalScoreCache =
+      TechnicalScoreCache(_httpClient, watchlist, notifications);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
 

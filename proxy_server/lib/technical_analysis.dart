@@ -25,18 +25,35 @@ extension SummarySignalJson on SummarySignal {
         SummarySignal.sell => 'sell',
         SummarySignal.strongSell => 'strongSell',
       };
+
+  /// Bildirim mesajları için (bkz. technical_score_cache.dart) — frontend'in
+  /// kendi `SummarySignal.label`'ıyla aynı Türkçe etiketler.
+  String get turkishLabel => switch (this) {
+        SummarySignal.strongBuy => 'Güçlü Al',
+        SummarySignal.buy => 'Al',
+        SummarySignal.neutral => 'Nötr',
+        SummarySignal.sell => 'Sat',
+        SummarySignal.strongSell => 'Güçlü Sat',
+      };
 }
 
 /// [buy]/[sell] sayısının [total]'a oranına göre 5 kademeli özet üretir.
 /// Investing.com'un tam algoritması yayınlanmadığından bu, yaygın teknik
 /// analiz sitelerinde kullanılan standart bir "oy sayımı" yöntemidir —
 /// Investing.com'un birebir aynısı olduğu iddia edilmez.
-SummarySignal _summarize(int buy, int sell, int total) {
-  final score = _scoreOf(buy, sell, total) / 100;
-  if (score >= 0.8) return SummarySignal.strongBuy;
-  if (score >= 0.6) return SummarySignal.buy;
-  if (score > 0.4) return SummarySignal.neutral;
-  if (score > 0.2) return SummarySignal.sell;
+SummarySignal _summarize(int buy, int sell, int total) =>
+    summarySignalForScore(_scoreOf(buy, sell, total));
+
+/// 0-100 arası bir puanı 5 kademeli özete çevirir — [_summarize] ile aynı
+/// eşikler, ama doğrudan bir puandan (ör. [TechnicalScoreCache]'te
+/// önbelleklenmiş bir önceki/yeni puan karşılaştırması) başlamak için
+/// dışa açık.
+SummarySignal summarySignalForScore(int score) {
+  final ratio = score / 100;
+  if (ratio >= 0.8) return SummarySignal.strongBuy;
+  if (ratio >= 0.6) return SummarySignal.buy;
+  if (ratio > 0.4) return SummarySignal.neutral;
+  if (ratio > 0.2) return SummarySignal.sell;
   return SummarySignal.strongSell;
 }
 
@@ -494,6 +511,47 @@ List<double> _emaSeriesGeneric(List<double> values, int period) {
     ema[i] = values[i] * k + ema[i - 1] * (1 - k);
   }
   return ema;
+}
+
+/// [rsiSeries]/[macdSeriesFor]'ın kullandığı MACD sonucu: her liste
+/// [closes] ile aynı uzunlukta, henüz hesaplanamayan indeksler `null`.
+typedef MacdSeries = ({List<double?> macd, List<double?> signal, List<double?> histogram});
+
+/// `/api/candles`'ın "TradingView tarzı" RSI paneli için tam RSI(14) zaman
+/// serisi (bkz. bin/server.dart `_candlesHandler`, `indicators=rsi` param).
+/// Teknik sekmesindeki [computeTechnicalAnalysis] yalnızca SON değerle
+/// ilgilenir; bu, mum grafiğinin altına çizilecek tüm geçmişi döner.
+List<double?> rsiSeries(List<double> closes, {int period = 14}) => _rsiSeries(closes, period);
+
+/// Aynı şekilde MACD(12,26,9) için tam zaman serisi (MACD çizgisi, sinyal
+/// çizgisi, histogram) — `/api/candles`'ın MACD paneli için.
+MacdSeries macdSeriesFor(
+  List<double> closes, {
+  int fastPeriod = 12,
+  int slowPeriod = 26,
+  int signalPeriod = 9,
+}) {
+  final n = closes.length;
+  final macd = List<double?>.filled(n, null);
+  final signal = List<double?>.filled(n, null);
+  final histogram = List<double?>.filled(n, null);
+  if (n < slowPeriod) return (macd: macd, signal: signal, histogram: histogram);
+
+  final emaFast = _emaSeriesGeneric(closes, fastPeriod);
+  final emaSlow = _emaSeriesGeneric(closes, slowPeriod);
+  for (var i = slowPeriod - 1; i < n; i++) {
+    macd[i] = emaFast[i] - emaSlow[i];
+  }
+
+  final validMacd = macd.sublist(slowPeriod - 1).cast<double>();
+  if (validMacd.length < signalPeriod) return (macd: macd, signal: signal, histogram: histogram);
+  final signalValid = _emaSeriesGeneric(validMacd, signalPeriod);
+  for (var i = signalPeriod - 1; i < validMacd.length; i++) {
+    final idx = slowPeriod - 1 + i;
+    signal[idx] = signalValid[i];
+    histogram[idx] = macd[idx]! - signalValid[i];
+  }
+  return (macd: macd, signal: signal, histogram: histogram);
 }
 
 /// Wilder'ın RSI için standart yumuşatma yöntemi: ilk değer basit ortalama,

@@ -488,6 +488,12 @@ class _NotificationTile extends StatelessWidget {
     this.onToggleFavorite,
   });
 
+  // Bildirim türünü ayırt eden bir sütun eklemek yerine (ayrı bir Supabase
+  // şema değişikliği gerektirirdi) mesaj metnindeki sabit önek üzerinden
+  // ayırt ediliyor — bkz. proxy_server/lib/technical_score_cache.dart'taki
+  // mesaj şablonu.
+  bool get _isScoreChange => item.message.contains('teknik puan kademesi değişti');
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -495,7 +501,10 @@ class _NotificationTile extends StatelessWidget {
       child: GlassCard(
         padding: EdgeInsets.zero,
         child: ListTile(
-          leading: const Icon(Icons.trending_down, color: AppColors.rose500),
+          leading: Icon(
+            _isScoreChange ? Icons.query_stats : Icons.trending_down,
+            color: _isScoreChange ? AppColors.cyan500 : AppColors.rose500,
+          ),
           title: Text(item.message, style: const TextStyle(color: AppColors.slate100)),
           subtitle: Text('${item.date} · ${item.createdAt}',
               style: const TextStyle(color: AppColors.slate400)),

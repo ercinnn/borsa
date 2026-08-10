@@ -179,6 +179,20 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   tells the frontend how many are still missing.
   `/api/technical-scores/refresh` fire-and-forget triggers a rescan, same
   `_checkInProgress`-style re-entrancy guard as `notifications/check-now`.
+  Each refresh also diffs a symbol's previous cached score against the new
+  one via `summarySignalForScore()` (exported from `technical_analysis.dart`
+  so both files threshold identically); crossing a Güçlü Al/Al/Nötr/Sat/
+  Güçlü Sat tier boundary writes a notification (via the same
+  `NotificationStore`/table `MonthlyLowChecker` uses — no separate
+  mechanism) to every user watching that symbol. Since the "previous" value
+  only lives in this in-memory map, a cold start forgets it — a rare tier
+  crossing can be missed right after a restart, but it can never
+  double-notify (documented tradeoff, same reasoning as the cache itself).
+  The frontend tells this notification type apart from a monthly-low one by
+  checking for the fixed substring `'teknik puan kademesi değişti'` in the
+  message (bkz. `notifications_screen.dart`'s `_NotificationTile
+  ._isScoreChange`) rather than a new Supabase column — deliberately, to
+  avoid a schema migration for what's ultimately just an icon/color choice.
 - `technical_analysis.dart` — `computeTechnicalAnalysis()` powers the Teknik
   tab: Investing.com-style Pivot Points (classic formula off the *previous*
   day's H/L/C), Simple+Exponential moving averages for
@@ -217,7 +231,17 @@ one of `60m/4h/1d/1wk/1mo/3mo/12mo` — `12mo` and `4h` don't exist in Yahoo
 and are synthesized server-side: `12mo` by grouping `1mo` candles in fixed
 chunks of 12, `4h` by fetching `60m` candles and grouping by wall-clock
 4-hour UTC buckets, *not* positional chunking, since intraday data has
-trading-hour/weekend gaps that fixed-size chunks would straddle),
+trading-hour/weekend gaps that fixed-size chunks would straddle; an
+optional `indicators=rsi,macd` param — only sent when
+`MarketApi.candles(includeIndicators: true)` — attaches a full RSI(14)/
+MACD(12,26,9) *time series* to each returned candle, computed on
+whichever candles are actually being returned (post-synthesis for
+`12mo`/`4h`) via `rsiSeries()`/`macdSeriesFor()` in `technical_analysis.dart`
+— distinct from `computeTechnicalAnalysis()`, which only needs the latest
+value; this is what draws the RSI/MACD sub-panels under the candlestick
+chart in `HomeScreen`/`TrackingScreen`, kept pixel-aligned to the candles
+above by sharing one `slotWidth` computed once in
+`CandlestickChart`'s `LayoutBuilder`, not per-panel),
 `watchlist` (GET/add/remove/bulk-add), `favorites` (GET/add/remove, same
 shape as `watchlist`), `tracked` (GET returns `{symbol}` or `{symbol:
 null}`, POST upserts it — backs the Takip tab), `technical` (GET, params:
@@ -241,7 +265,7 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of five tab screens behind a bottom `NavigationBar`:
+`IndexedStack` of six tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
 notification feed — its watchlist-management area itself has two sub-tabs,
 "İzleme Listesi" (the existing add/remove/preset UI) and "Puan Sıralaması"
@@ -257,7 +281,15 @@ feed below stays visible regardless of which sub-tab is selected),
 (Pivot Points/Moving Averages/Indicators + Buy-Sell summary for whatever
 symbols the user has added there — its own `TechnicalWatchlistStore`-backed
 list, independent of `HomeScreen`'s selection or the watchlist/favorites;
-see `technical_analysis.dart` in the backend section for the computation).
+see `technical_analysis.dart` in the backend section for the computation),
+and `ComparisonScreen` (2-4 symbols overlaid on one line chart, each
+normalized to % change from its own first candle — no backend change
+needed, it's plain `/api/candles` calls per symbol; `widgets/
+comparison_chart.dart`'s doc comment explains the alignment tradeoff: since
+symbols can trade on different calendars — BIST closed weekends, crypto
+7/24 — series are truncated to the shortest one's length, aligned so
+*today* lines up for all of them, rather than attempting real calendar-date
+alignment from the pre-formatted `period` strings).
 Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an
