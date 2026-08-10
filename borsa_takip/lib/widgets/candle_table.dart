@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/candle.dart';
 import '../theme/app_colors.dart';
+import '../utils/price_format.dart';
 
 class CandleTable extends StatelessWidget {
   final CandleResult result;
@@ -39,7 +40,7 @@ class CandleTable extends StatelessWidget {
                 DataCell(Text(row.period,
                     style: const TextStyle(color: AppColors.slate100))),
                 DataCell(Text(
-                  '${row.low.toStringAsFixed(2)} ${result.currency}',
+                  '${formatPrice(row.low)} ${result.currency}',
                   style: GoogleFonts.robotoMono(
                     fontWeight: row.period == lowest.period
                         ? FontWeight.w700

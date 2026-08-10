@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 
+import 'price_format.dart';
 import 'store.dart';
 import 'yahoo_client.dart';
 
@@ -89,7 +90,7 @@ class MonthlyLowChecker {
           'date': dateKey,
           'createdAt': createdAt,
           'message':
-              '$symbol bu ayki en düşük değerine ulaştı: ${today.low.toStringAsFixed(4)} ${data.currency}',
+              '$symbol bu ayki en düşük değerine ulaştı: ${formatPrice(today.low)} ${data.currency}',
         },
     ];
     await notifications.addAll(items);

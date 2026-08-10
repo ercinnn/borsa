@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/candle.dart';
 import '../theme/app_colors.dart';
+import '../utils/price_format.dart';
 import 'glass_card.dart';
 
 class CandlestickChart extends StatefulWidget {
@@ -222,10 +223,10 @@ class _CandleInfoPopup extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            Text('Yüksek: ${candle.high.toStringAsFixed(2)}',
+            Text('Yüksek: ${formatPrice(candle.high)}',
                 style: GoogleFonts.robotoMono(
                     fontSize: 11, color: AppColors.emerald400)),
-            Text('Düşük: ${candle.low.toStringAsFixed(2)}',
+            Text('Düşük: ${formatPrice(candle.low)}',
                 style: GoogleFonts.robotoMono(fontSize: 11, color: AppColors.rose500)),
           ],
         ),
@@ -288,8 +289,7 @@ class _PriceAxis extends StatelessWidget {
       children: [
         for (var i = 0; i < ticks; i++)
           Text(
-            (maxPrice - (maxPrice - minPrice) * i / (ticks - 1))
-                .toStringAsFixed(2),
+            formatPrice(maxPrice - (maxPrice - minPrice) * i / (ticks - 1)),
             style: GoogleFonts.robotoMono(fontSize: 10, color: AppColors.slate400),
           ),
       ],
