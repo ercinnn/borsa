@@ -334,6 +334,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     : () => widget.onOpenChart!(
                           MarketSymbol(symbol: n.symbol, name: n.symbol),
                         ),
+                isFavorite: widget.favorites.contains(n.symbol.toUpperCase()),
+                onToggleFavorite: widget.onToggleFavorite == null
+                    ? null
+                    : () => widget.onToggleFavorite!(n.symbol),
               ),
             const SizedBox(height: 12),
             _Pagination(
@@ -430,8 +434,15 @@ class _WatchlistSymbolChip extends StatelessWidget {
 class _NotificationTile extends StatelessWidget {
   final NotificationItem item;
   final VoidCallback? onTap;
+  final bool isFavorite;
+  final VoidCallback? onToggleFavorite;
 
-  const _NotificationTile({required this.item, this.onTap});
+  const _NotificationTile({
+    required this.item,
+    this.onTap,
+    this.isFavorite = false,
+    this.onToggleFavorite,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -441,7 +452,20 @@ class _NotificationTile extends StatelessWidget {
         leading: const Icon(Icons.trending_down),
         title: Text(item.message),
         subtitle: Text('${item.date} · ${item.createdAt}'),
-        trailing: onTap == null ? null : const Icon(Icons.chevron_right),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(
+                isFavorite ? Icons.star : Icons.star_border,
+                color: isFavorite ? Colors.amber : Colors.grey,
+              ),
+              onPressed: onToggleFavorite,
+              tooltip: isFavorite ? 'Favorilerden çıkar' : 'Favorilere ekle',
+            ),
+            if (onTap != null) const Icon(Icons.chevron_right),
+          ],
+        ),
         onTap: onTap,
       ),
     );

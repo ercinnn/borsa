@@ -123,7 +123,15 @@ class _RootShellState extends State<RootShell> {
           : await _api.addToFavorites(normalized);
       if (!mounted) return;
       setState(() => _favorites = updated);
-    } catch (_) {}
+    } catch (e) {
+      // Önceden burada hata sessizce yutuluyordu; kullanıcıya hiçbir şey
+      // olmamış gibi görünüyordu (ör. favorites tablosu Supabase'de henüz
+      // oluşturulmamışsa). Artık en azından bir SnackBar ile görünür.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Favori işlemi başarısız: $e')),
+      );
+    }
   }
 
   void _openChartFor(MarketSymbol symbol) {
