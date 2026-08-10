@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/symbol.dart';
@@ -31,75 +32,145 @@ class BorsaTakipApp extends StatelessWidget {
   }
 }
 
-/// CLAUDE.md "UI/UX Tasarım Kuralları"nı uygulayan tek tema tanımı: renk
-/// (slate arka plan/kart/metin paleti), tipografi (başlıklarda semibold +
-/// sıkı tracking, ikincil metinlerde slate-500) ve kart görünümü (beyaz
-/// zemin, ince border, yumuşak gölge, rounded-xl). Ekranlar zaten
-/// `Theme.of(context).textTheme.titleMedium` gibi tema üzerinden okuduğundan
-/// bu tanım tek başına çoğu ekrana otomatik yansır; kart/boşluk gruplaması
-/// yine de her ekranın kendi layout'unda yapılmalı (bkz. home_screen.dart).
+/// CLAUDE.md "UI/UX Tasarım Kuralları" → "Modern BIST/Borsa Analitik (Koyu &
+/// Tech Tema)"nı uygulayan tek tema tanımı: koyu slate arka plan/kart/metin
+/// paleti, tipografi (başlıklarda semibold + sıkı tracking, ikincil
+/// metinlerde slate-400, sayısal veri için monospace) ve buton/alan
+/// görünümü. Asıl "glassmorphism" kart efekti (blur + yarı saydam zemin)
+/// `ThemeData.cardTheme` ile ifade edilemediğinden `GlassCard` widget'ında
+/// ayrıca uygulanıyor (bkz. widgets/glass_card.dart); buradaki `cardTheme`
+/// sadece henüz `GlassCard`'a taşınmamış yerler için düz bir koyu geri
+/// düşüş (fallback). Ekranlar zaten `Theme.of(context).textTheme
+/// .titleMedium` gibi tema üzerinden okuduğundan bu tanım tek başına çoğu
+/// ekrana otomatik yansır.
 ThemeData _buildTheme() {
-  const cardBorder = BorderSide(color: Color(0x80E2E8F0)); // slate-200 @ 80%
+  final monoTextStyle = GoogleFonts.robotoMono(
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.2,
+    color: AppColors.slate100,
+  );
   return ThemeData(
     useMaterial3: true,
-    scaffoldBackgroundColor: AppColors.slate50,
+    scaffoldBackgroundColor: AppColors.slate950,
+    fontFamily: GoogleFonts.inter().fontFamily,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: Colors.indigo,
-      surface: Colors.white,
+      seedColor: AppColors.cyan500,
+      brightness: Brightness.dark,
+      primary: AppColors.cyan500,
+      secondary: AppColors.emerald400,
+      error: AppColors.rose500,
+      surface: AppColors.slate900,
     ),
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.slate50,
-      foregroundColor: AppColors.slate900,
+      backgroundColor: AppColors.slate950,
+      foregroundColor: AppColors.slate100,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       titleTextStyle: TextStyle(
-        color: AppColors.slate900,
+        color: AppColors.slate100,
         fontSize: 20,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.2,
       ),
     ),
-    textTheme: const TextTheme(
-      titleLarge: TextStyle(
+    textTheme: TextTheme(
+      titleLarge: const TextStyle(
         fontWeight: FontWeight.w600,
         letterSpacing: -0.2,
-        color: AppColors.slate900,
+        color: AppColors.slate100,
       ),
-      titleMedium: TextStyle(
+      titleMedium: const TextStyle(
         fontWeight: FontWeight.w600,
         letterSpacing: -0.2,
-        color: AppColors.slate900,
+        color: AppColors.slate100,
       ),
-      bodyMedium: TextStyle(color: AppColors.slate900),
-      bodySmall: TextStyle(color: AppColors.slate500),
-      labelSmall: TextStyle(
+      bodyMedium: const TextStyle(color: AppColors.slate100),
+      bodySmall: const TextStyle(color: AppColors.slate400),
+      // Etiket/ticker metinleri (madde 3): büyük harfe çevirme
+      // (`.toUpperCase()`) çağrı yerinde yapılmalı, CSS text-transform
+      // karşılığı olmadığından burada uygulanamaz.
+      labelSmall: const TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         letterSpacing: 0.8,
         color: AppColors.slate400,
       ),
+      // Sayısal veri/fiyatlar (madde 3): monospace + sıkı tracking.
+      labelLarge: monoTextStyle,
     ),
-    cardTheme: const CardThemeData(
-      color: Colors.white,
-      elevation: 2,
-      shadowColor: Color(0x14000000), // shadow-sm karşılığı: çok soft siyah
+    cardTheme: CardThemeData(
+      color: AppColors.glassFill,
+      elevation: 0,
       surfaceTintColor: Colors.transparent,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(12)),
-        side: cardBorder,
+        borderRadius: const BorderRadius.all(Radius.circular(12)),
+        side: AppColors.glassBorder.top,
       ),
+    ),
+    dividerTheme: DividerThemeData(color: AppColors.slate800.withValues(alpha: 0.8)),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: AppColors.slate900.withValues(alpha: 0.6),
+      labelStyle: const TextStyle(color: AppColors.slate400),
+      hintStyle: const TextStyle(color: AppColors.slate400),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: AppColors.slate800.withValues(alpha: 0.8)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: AppColors.slate800.withValues(alpha: 0.8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.cyan500),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: AppColors.slate900.withValues(alpha: 0.6),
+      selectedColor: AppColors.cyan500.withValues(alpha: 0.2),
+      labelStyle: const TextStyle(color: AppColors.slate100),
+      side: BorderSide(color: AppColors.slate800.withValues(alpha: 0.8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.slate100,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        side: const BorderSide(color: AppColors.slate200),
+        side: BorderSide(color: AppColors.slate800.withValues(alpha: 0.8)),
       ),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         elevation: 0,
+        backgroundColor: AppColors.cyan500,
+        foregroundColor: AppColors.slate950,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(foregroundColor: AppColors.cyan500),
+    ),
+    iconTheme: const IconThemeData(color: AppColors.slate400),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: AppColors.slate900.withValues(alpha: 0.9),
+      indicatorColor: AppColors.cyan500.withValues(alpha: 0.2),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: states.contains(WidgetState.selected)
+              ? AppColors.slate100
+              : AppColors.slate400,
+        ),
+      ),
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected)
+              ? AppColors.cyan500
+              : AppColors.slate400,
+        ),
       ),
     ),
   );

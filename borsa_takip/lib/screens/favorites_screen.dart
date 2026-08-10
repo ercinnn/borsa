@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../models/symbol.dart';
 import '../services/market_api.dart';
+import '../theme/app_colors.dart';
+import '../widgets/glass_card.dart';
 import '../widgets/symbol_search_field.dart';
 
 class FavoritesScreen extends StatefulWidget {
@@ -63,20 +65,23 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             )
           else
             for (final s in widget.favorites)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: IconButton(
-                    icon: const Icon(Icons.star, color: Colors.amber),
-                    onPressed: () => widget.onToggleFavorite(s),
-                    tooltip: 'Favorilerden çıkar',
-                  ),
-                  title: Text(s),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.query_stats),
-                    onPressed: () =>
-                        widget.onTrack(MarketSymbol(symbol: s, name: s)),
-                    tooltip: 'Takip sekmesinde izle',
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(
+                  padding: EdgeInsets.zero,
+                  child: ListTile(
+                    leading: IconButton(
+                      icon: const Icon(Icons.star, color: Colors.amber),
+                      onPressed: () => widget.onToggleFavorite(s),
+                      tooltip: 'Favorilerden çıkar',
+                    ),
+                    title: Text(s, style: const TextStyle(color: AppColors.slate100)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.query_stats, color: AppColors.cyan500),
+                      onPressed: () =>
+                          widget.onTrack(MarketSymbol(symbol: s, name: s)),
+                      tooltip: 'Takip sekmesinde izle',
+                    ),
                   ),
                 ),
               ),

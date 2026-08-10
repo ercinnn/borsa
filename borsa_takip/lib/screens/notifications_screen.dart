@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../models/notification_item.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
+import '../theme/app_colors.dart';
+import '../widgets/glass_card.dart';
 import '../widgets/symbol_search_field.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -207,10 +209,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.errorContainer,
+                color: AppColors.rose500.withValues(alpha: 0.15),
+                border: Border.all(color: AppColors.rose500.withValues(alpha: 0.4)),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(_error!),
+              child: Text(_error!, style: const TextStyle(color: AppColors.slate100)),
             ),
           Text('İzleme Listesi', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
@@ -262,7 +265,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             const SizedBox(height: 8),
             DecoratedBox(
               decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
+                border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: TabBar(
@@ -406,12 +409,13 @@ class _WatchlistSymbolChip extends StatelessWidget {
       padding: const EdgeInsets.only(left: 12, right: 4),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).dividerColor),
+        color: AppColors.slate900.withValues(alpha: 0.6),
+        border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(symbol),
+          Text(symbol, style: const TextStyle(color: AppColors.slate100)),
           IconButton(
             icon: Icon(
               isFavorite ? Icons.star : Icons.star_border,
@@ -453,27 +457,32 @@ class _NotificationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: const Icon(Icons.trending_down),
-        title: Text(item.message),
-        subtitle: Text('${item.date} · ${item.createdAt}'),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(
-                isFavorite ? Icons.star : Icons.star_border,
-                color: isFavorite ? Colors.amber : Colors.grey,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GlassCard(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          leading: const Icon(Icons.trending_down, color: AppColors.rose500),
+          title: Text(item.message, style: const TextStyle(color: AppColors.slate100)),
+          subtitle: Text('${item.date} · ${item.createdAt}',
+              style: const TextStyle(color: AppColors.slate400)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(
+                  isFavorite ? Icons.star : Icons.star_border,
+                  color: isFavorite ? Colors.amber : AppColors.slate400,
+                ),
+                onPressed: onToggleFavorite,
+                tooltip: isFavorite ? 'Favorilerden çıkar' : 'Favorilere ekle',
               ),
-              onPressed: onToggleFavorite,
-              tooltip: isFavorite ? 'Favorilerden çıkar' : 'Favorilere ekle',
-            ),
-            if (onTap != null) const Icon(Icons.chevron_right),
-          ],
+              if (onTap != null)
+                const Icon(Icons.chevron_right, color: AppColors.slate400),
+            ],
+          ),
+          onTap: onTap,
         ),
-        onTap: onTap,
       ),
     );
   }

@@ -2,6 +2,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../theme/app_colors.dart';
+import '../widgets/glass_card.dart';
+import '../widgets/gradient_button.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -83,82 +87,93 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Borsa Takip',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'E-posta',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Şifre',
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _submit(),
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _loading ? null : _submit,
-                  child: _loading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(_isSignUp ? 'Kayıt Ol' : 'Giriş Yap'),
-                ),
-                TextButton(
-                  onPressed:
-                      _loading ? null : () => setState(() => _isSignUp = !_isSignUp),
-                  child: Text(
-                    _isSignUp
-                        ? 'Zaten hesabın var mı? Giriş yap'
-                        : 'Hesabın yok mu? Kayıt ol',
-                  ),
-                ),
-                // Google OAuth redirectTo mantığı (bkz. _signInWithGoogle)
-                // Uri.base.toString() ile tarayıcı URL'sine dayanıyor;
-                // mobilde anlamsız olduğundan buton sadece web'de gösterilir.
-                if (kIsWeb) ...[
-                  const SizedBox(height: 8),
-                  const Row(
-                    children: [
-                      Expanded(child: Divider()),
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('veya'),
+      body: DecoratedBox(
+        decoration: const BoxDecoration(color: AppColors.slate950),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: GlassCard(
+                glow: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ShaderMask(
+                      shaderCallback: (bounds) =>
+                          AppColors.bullishGradient.createShader(bounds),
+                      child: Text(
+                        'BORSA TAKİP',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: Colors.white,
+                              letterSpacing: 1.2,
+                            ),
                       ),
-                      Expanded(child: Divider()),
+                    ),
+                    const SizedBox(height: 24),
+                    TextField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: const TextStyle(color: AppColors.slate100),
+                      decoration: const InputDecoration(labelText: 'E-posta'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: true,
+                      style: const TextStyle(color: AppColors.slate100),
+                      decoration: const InputDecoration(labelText: 'Şifre'),
+                      onSubmitted: (_) => _submit(),
+                    ),
+                    const SizedBox(height: 20),
+                    GradientButton(
+                      onPressed: _loading ? null : _submit,
+                      loading: _loading,
+                      expand: true,
+                      label: _isSignUp ? 'Kayıt Ol' : 'Giriş Yap',
+                    ),
+                    TextButton(
+                      onPressed: _loading
+                          ? null
+                          : () => setState(() => _isSignUp = !_isSignUp),
+                      child: Text(
+                        _isSignUp
+                            ? 'Zaten hesabın var mı? Giriş yap'
+                            : 'Hesabın yok mu? Kayıt ol',
+                      ),
+                    ),
+                    // Google OAuth redirectTo mantığı (bkz. _signInWithGoogle)
+                    // Uri.base.toString() ile tarayıcı URL'sine dayanıyor;
+                    // mobilde anlamsız olduğundan buton sadece web'de gösterilir.
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                              child: Divider(
+                                  color: AppColors.slate800.withValues(alpha: 0.8))),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('veya',
+                                style: TextStyle(color: AppColors.slate400)),
+                          ),
+                          Expanded(
+                              child: Divider(
+                                  color: AppColors.slate800.withValues(alpha: 0.8))),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _loading ? null : _signInWithGoogle,
+                        icon: const Icon(Icons.login),
+                        label: const Text('Google ile Giriş Yap'),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _loading ? null : _signInWithGoogle,
-                    icon: const Icon(Icons.login),
-                    label: const Text('Google ile Giriş Yap'),
-                  ),
-                ],
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../models/symbol.dart';
 import '../services/market_api.dart';
+import '../theme/app_colors.dart';
+import 'glass_card.dart';
 
 class SymbolSearchField extends StatefulWidget {
   final MarketApi api;
@@ -92,31 +94,36 @@ class _SymbolSearchFieldState extends State<SymbolSearchField> {
         if (_error != null)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(_error!, style: TextStyle(color: Colors.red[700])),
+            child: Text(_error!, style: const TextStyle(color: AppColors.rose500)),
           ),
         if (_results.isNotEmpty)
-          Card(
-            margin: const EdgeInsets.only(top: 4),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 240),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _results.length,
-                itemBuilder: (context, i) {
-                  final s = _results[i];
-                  return ListTile(
-                    dense: true,
-                    title: Text(s.symbol),
-                    subtitle: Text('${s.name} · ${s.exchange}'),
-                    onTap: () {
-                      widget.onSelect(s);
-                      setState(() {
-                        _results = [];
-                        _controller.clear();
-                      });
-                    },
-                  );
-                },
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: GlassCard(
+              padding: EdgeInsets.zero,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _results.length,
+                  itemBuilder: (context, i) {
+                    final s = _results[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text(s.symbol,
+                          style: const TextStyle(color: AppColors.slate100)),
+                      subtitle: Text('${s.name} · ${s.exchange}',
+                          style: const TextStyle(color: AppColors.slate400)),
+                      onTap: () {
+                        widget.onSelect(s);
+                        setState(() {
+                          _results = [];
+                          _controller.clear();
+                        });
+                      },
+                    );
+                  },
+                ),
               ),
             ),
           ),

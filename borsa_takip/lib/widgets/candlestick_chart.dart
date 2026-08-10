@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../models/candle.dart';
+import '../theme/app_colors.dart';
+import 'glass_card.dart';
 
 class CandlestickChart extends StatefulWidget {
   final CandleResult result;
@@ -62,15 +65,15 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final minPrice = _minPrice;
     final maxPrice = _maxPrice;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+    return GlassCard(
+      padding: const EdgeInsets.all(12),
+      glow: true,
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${widget.result.symbol} · Mum Grafik',
-              style: Theme.of(context).textTheme.titleMedium,
+              '${widget.result.symbol} · Mum Grafik'.toUpperCase(),
+              style: Theme.of(context).textTheme.labelSmall,
             ),
             const SizedBox(height: 8),
             Row(
@@ -167,7 +170,6 @@ class _CandlestickChartState extends State<CandlestickChart> {
             ),
           ],
         ),
-      ),
     );
   }
 }
@@ -191,37 +193,41 @@ class _CandleInfoPopup extends StatelessWidget {
       left: left,
       top: 4,
       width: width,
-      child: Card(
-        elevation: 4,
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      candle.period,
-                      style: const TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.slate900.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    candle.period,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.slate100),
                   ),
-                  GestureDetector(
-                    onTap: onClose,
-                    child: const Icon(Icons.close, size: 14),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text('Yüksek: ${candle.high.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF1B8A5A))),
-              Text('Düşük: ${candle.low.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFFC62828))),
-            ],
-          ),
+                ),
+                GestureDetector(
+                  onTap: onClose,
+                  child: const Icon(Icons.close, size: 14, color: AppColors.slate400),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('Yüksek: ${candle.high.toStringAsFixed(2)}',
+                style: GoogleFonts.robotoMono(
+                    fontSize: 11, color: AppColors.emerald400)),
+            Text('Düşük: ${candle.low.toStringAsFixed(2)}',
+                style: GoogleFonts.robotoMono(fontSize: 11, color: AppColors.rose500)),
+          ],
         ),
       ),
     );
@@ -255,7 +261,7 @@ class _PeriodLabels extends StatelessWidget {
               fit: BoxFit.scaleDown,
               child: Text(
                 candles[i].period,
-                style: const TextStyle(fontSize: 10),
+                style: const TextStyle(fontSize: 10, color: AppColors.slate400),
               ),
             ),
           ),
@@ -284,7 +290,7 @@ class _PriceAxis extends StatelessWidget {
           Text(
             (maxPrice - (maxPrice - minPrice) * i / (ticks - 1))
                 .toStringAsFixed(2),
-            style: const TextStyle(fontSize: 10, color: Colors.grey),
+            style: GoogleFonts.robotoMono(fontSize: 10, color: AppColors.slate400),
           ),
       ],
     );
@@ -317,7 +323,7 @@ class _CandlestickPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final gridPaint = Paint()
-      ..color = Colors.grey.withValues(alpha: 0.2)
+      ..color = AppColors.slate800.withValues(alpha: 0.5)
       ..strokeWidth = 1;
     for (var i = 0; i <= 4; i++) {
       final y = size.height * i / 4;
@@ -327,7 +333,7 @@ class _CandlestickPainter extends CustomPainter {
     // _PeriodLabels ile aynı grup sınırlarında, o tarihe denk gelen ince
     // dikey referans çizgileri.
     final dateGridPaint = Paint()
-      ..color = Colors.grey.withValues(alpha: 0.18)
+      ..color = AppColors.slate800.withValues(alpha: 0.35)
       ..strokeWidth = 1;
     for (var i = 0; i < candles.length; i += labelEvery) {
       final x = i * slotWidth;
@@ -339,7 +345,7 @@ class _CandlestickPainter extends CustomPainter {
       final c = candles[i];
       final x = i * slotWidth + slotWidth / 2;
       final isUp = c.close >= c.open;
-      final color = isUp ? const Color(0xFF1B8A5A) : const Color(0xFFC62828);
+      final color = isUp ? AppColors.emerald400 : AppColors.rose500;
 
       final wickPaint = Paint()
         ..color = color

@@ -7,6 +7,7 @@ import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../widgets/chart_result_section.dart';
 import '../widgets/favorite_symbols_bar.dart';
+import '../widgets/glass_card.dart';
 import '../widgets/symbol_search_field.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -140,57 +141,51 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Favoriler', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 16),
-                  FavoriteSymbolsBar(
-                    symbols: [
-                      for (final s in widget.favorites)
-                        MarketSymbol(symbol: s, name: s),
-                    ],
-                    selected: _selectedSymbol,
-                    onSelect: _selectSymbol,
-                  ),
-                  const SizedBox(height: 24),
-                  SymbolSearchField(api: _api, onSelect: _selectSymbol),
-                ],
-              ),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Favoriler', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                FavoriteSymbolsBar(
+                  symbols: [
+                    for (final s in widget.favorites)
+                      MarketSymbol(symbol: s, name: s),
+                  ],
+                  selected: _selectedSymbol,
+                  onSelect: _selectSymbol,
+                ),
+                const SizedBox(height: 24),
+                SymbolSearchField(api: _api, onSelect: _selectSymbol),
+              ],
             ),
           ),
           const SizedBox(height: 24),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Zaman Aralığı', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 16),
-                  ChartResultSection(
-                    intervals: ChartInterval.longTerm,
-                    selectedInterval: _interval,
-                    onSelectInterval: _selectInterval,
-                    dateRange: _dateRange,
-                    dateFormat: _dateFormat,
-                    onPickDateRange: _pickDateRange,
-                    fetchLabel: 'Getir',
-                    fetchIcon: Icons.show_chart,
-                    onFetch: _selectedSymbol == null || _loading ? null : _fetch,
-                    loading: _loading,
-                    error: _error,
-                    result: _result,
-                    leadingActions: [
-                      if (_selectedSymbol != null)
-                        Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
-                    ],
-                  ),
-                ],
-              ),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Zaman Aralığı', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                ChartResultSection(
+                  intervals: ChartInterval.longTerm,
+                  selectedInterval: _interval,
+                  onSelectInterval: _selectInterval,
+                  dateRange: _dateRange,
+                  dateFormat: _dateFormat,
+                  onPickDateRange: _pickDateRange,
+                  fetchLabel: 'Getir',
+                  fetchIcon: Icons.show_chart,
+                  onFetch: _selectedSymbol == null || _loading ? null : _fetch,
+                  loading: _loading,
+                  error: _error,
+                  result: _result,
+                  leadingActions: [
+                    if (_selectedSymbol != null)
+                      Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

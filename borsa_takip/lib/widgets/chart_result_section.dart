@@ -3,9 +3,10 @@ import 'package:intl/intl.dart';
 
 import '../models/candle.dart';
 import '../models/interval.dart';
+import '../theme/app_colors.dart';
 import 'candle_table.dart';
 import 'candlestick_chart.dart';
-import 'pressable_scale.dart';
+import 'gradient_button.dart';
 
 /// HomeScreen ve TrackingScreen'in ortak render bloğu: interval seçim
 /// chip'leri, tarih aralığı/yenile butonları, loading/error durumu ve sonuç
@@ -78,12 +79,10 @@ class ChartResultSection extends StatelessWidget {
                         '${dateFormat.format(dateRange!.end)}',
               ),
             ),
-            PressableScale(
-              child: ElevatedButton.icon(
-                onPressed: onFetch,
-                icon: Icon(fetchIcon),
-                label: Text(fetchLabel),
-              ),
+            GradientButton(
+              onPressed: onFetch,
+              icon: Icon(fetchIcon),
+              label: fetchLabel,
             ),
           ],
         ),
@@ -93,10 +92,11 @@ class ChartResultSection extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.errorContainer,
+              color: AppColors.rose500.withValues(alpha: 0.15),
+              border: Border.all(color: AppColors.rose500.withValues(alpha: 0.4)),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(error!),
+            child: Text(error!, style: const TextStyle(color: AppColors.slate100)),
           ),
         if (result != null) ...[
           CandlestickChart(result: result!),
