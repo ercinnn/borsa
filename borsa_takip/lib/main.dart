@@ -7,6 +7,7 @@ import 'screens/backtest_screen.dart';
 import 'screens/comparison_screen.dart';
 import 'screens/dividend_screen.dart';
 import 'screens/favorites_screen.dart';
+import 'screens/fundamentals_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
@@ -263,6 +264,7 @@ class _RootShellState extends State<RootShell> {
     'Portföy',
     'Temettü',
     'Backtest',
+    'Temel Analiz',
   ];
 
   @override
@@ -400,6 +402,10 @@ class _RootShellState extends State<RootShell> {
             const BacktestScreen()
           else
             const SizedBox.shrink(),
+          if (_visitedTabs.contains(9))
+            const FundamentalsScreen()
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -416,6 +422,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.pie_chart), label: 'Portföy'),
           NavigationDestination(icon: Icon(Icons.payments), label: 'Temettü'),
           NavigationDestination(icon: Icon(Icons.history_toggle_off), label: 'Backtest'),
+          NavigationDestination(icon: Icon(Icons.balance), label: 'Temel Analiz'),
         ],
       ),
     );

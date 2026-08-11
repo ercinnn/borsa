@@ -17,3 +17,5 @@ services:
         sync: false
       - key: COINGECKO_API_KEY
         sync: false
+      - key: ADMIN_SYNC_SECRET
+        sync: false

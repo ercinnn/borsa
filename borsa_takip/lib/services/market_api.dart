@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/backtest.dart';
 import '../models/candle.dart';
 import '../models/dividend.dart';
+import '../models/fundamentals.dart';
 import '../models/interval.dart';
 import '../models/notification_item.dart';
 import '../models/portfolio.dart';
@@ -262,6 +263,41 @@ class MarketApi {
     });
     final resp = await _get(uri);
     return BacktestResult.fromJson(resp);
+  }
+
+  /// Temel Analiz sekmesi (bkz. models/fundamentals.dart). Teknik sekmesiyle
+  /// aynı izleme listesini (`TechnicalWatchlistStore`) paylaşır — ayrı bir
+  /// watchlist endpoint'i yok, bkz. getTechnicalWatchlist/
+  /// addToTechnicalWatchlist/removeFromTechnicalWatchlist yukarıda. Dördü de
+  /// `/api/technical` gibi auth gerektirmez; backend'de Supabase'de 24 saat
+  /// önbelleklenir (bkz. proxy_server/lib/fundamentals_cache.dart), bu
+  /// yüzden ilk istek dışında hızlıdır.
+  Future<StockOverview> getFundamentalOverview(String symbol) async {
+    final uri = Uri.parse('$_baseUrl/api/fundamentals/overview')
+        .replace(queryParameters: {'symbol': symbol});
+    final resp = await _get(uri);
+    return StockOverview.fromJson(resp);
+  }
+
+  Future<FairValueResult> getFairValue(String symbol) async {
+    final uri = Uri.parse('$_baseUrl/api/fundamentals/fair-value')
+        .replace(queryParameters: {'symbol': symbol});
+    final resp = await _get(uri);
+    return FairValueResult.fromJson(resp);
+  }
+
+  Future<HealthScoreResult> getHealthScore(String symbol) async {
+    final uri = Uri.parse('$_baseUrl/api/fundamentals/health-score')
+        .replace(queryParameters: {'symbol': symbol});
+    final resp = await _get(uri);
+    return HealthScoreResult.fromJson(resp);
+  }
+
+  Future<ProTipsResult> getFundamentalProTips(String symbol) async {
+    final uri = Uri.parse('$_baseUrl/api/fundamentals/protips')
+        .replace(queryParameters: {'symbol': symbol});
+    final resp = await _get(uri);
+    return ProTipsResult.fromJson(resp);
   }
 
   /// Portföy sekmesi: pozisyonlar + canlı fiyat/TL karşılığıyla hesaplanmış

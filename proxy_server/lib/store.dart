@@ -192,6 +192,120 @@ class DividendWatchlistStore {
   }
 }
 
+/// Temel Analiz için sembol bazlı, HERKESE AÇIK piyasa verisi — diğer tüm
+/// Store sınıflarının aksine `userId` almaz (bkz.
+/// supabase_schema_fundamentals.sql'in RLS deseni notu: bu üç tablo
+/// anon/authenticated'e SELECT açık, yazma yalnızca bu proxy'nin
+/// service_role anahtarıyla).
+class StockStore {
+  final SupabaseTable _table;
+
+  StockStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'stocks');
+
+  Future<Map<String, dynamic>?> getBySymbol(String symbol) async {
+    final rows = await _table.select(
+      filters: {'symbol': 'eq.${symbol.trim().toUpperCase()}', 'limit': '1'},
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<void> upsert({
+    required String symbol,
+    required String companyName,
+    String? sector,
+    String? country,
+    required String currency,
+    required double lastPrice,
+    double? marketCap,
+    double? peRatio,
+    double? pbRatio,
+    double? dividendYield,
+  }) async {
+    await _table.insert(
+      {
+        'symbol': symbol.trim().toUpperCase(),
+        'company_name': companyName,
+        'sector': sector,
+        'country': country,
+        'currency': currency,
+        'last_price': lastPrice,
+        'market_cap': marketCap,
+        'pe_ratio': peRatio,
+        'pb_ratio': pbRatio,
+        'dividend_yield': dividendYield,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      onConflict: 'symbol',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    );
+  }
+}
+
+/// Sembol başına son ~4 yıllık finansal metrik geçmişi — bkz.
+/// yahoo_fundamentals.dart FinancialYear.toJson() (tek düz JSONB, ayrı
+/// bilanço/gelir tablosu/nakit akışı objeleri değil, doc yorumundaki
+/// gerekçe için bkz. supabase_schema_fundamentals.sql).
+class FinancialStatementStore {
+  final SupabaseTable _table;
+
+  FinancialStatementStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'financial_statements');
+
+  Future<List<Map<String, dynamic>>> getBySymbol(String symbol) {
+    return _table.select(
+      filters: {
+        'symbol': 'eq.${symbol.trim().toUpperCase()}',
+        'order': 'fiscal_year.asc',
+      },
+    );
+  }
+
+  Future<void> upsertAll(String symbol, List<Map<String, dynamic>> years) async {
+    final normalized = symbol.trim().toUpperCase();
+    if (years.isEmpty) return;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _table.insert(
+      [
+        for (final y in years)
+          {'symbol': normalized, 'fiscal_year': y['fiscalYear'], 'data': y, 'updated_at': now},
+      ],
+      onConflict: 'symbol,fiscal_year',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    );
+  }
+}
+
+/// Sembol başına en son hesaplanmış DCF/Piotroski/Altman/ProTips sonucu —
+/// GET endpoint'leri (bkz. bin/server.dart) her istekte yeniden hesaplamak
+/// yerine bunu okur; yalnızca veri 24 saatten eskiyse (bkz.
+/// fundamentals_cache.dart) yeniden hesaplanıp buraya yazılır.
+class StockScoreStore {
+  final SupabaseTable _table;
+
+  StockScoreStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'stock_scores');
+
+  Future<Map<String, dynamic>?> getBySymbol(String symbol) async {
+    final rows = await _table.select(
+      filters: {'symbol': 'eq.${symbol.trim().toUpperCase()}', 'limit': '1'},
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<void> upsert(String symbol, Map<String, dynamic> scoreData) async {
+    await _table.insert(
+      {
+        'symbol': symbol.trim().toUpperCase(),
+        ...scoreData,
+        'computed_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      onConflict: 'symbol',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    );
+  }
+}
+
 class PortfolioHoldingRow {
   final String symbol;
   final double quantity;
