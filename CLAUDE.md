@@ -606,7 +606,16 @@ adding a new interval rather than iterating `ChartInterval.values`.
   changes it, `fetchStockOverview`/`fetchFinancialHistory` will start
   throwing `YahooException`s (surfaced as 404s to the frontend) until the
   handshake is updated — this is a meaningfully higher-risk dependency than
-  everything else in `yahoo_client.dart`.
+  everything else in `yahoo_client.dart`. Separately (and observed live in
+  production, not just theoretical): Yahoo rate-limits this handshake
+  more aggressively from Render's shared cloud IPs than from a residential
+  dev machine — the exact same "Render IP gets 429'd, my laptop doesn't"
+  problem `coingecko_client.dart` already has a comment about. Fixed with
+  the identical pattern: `_getWithRetry()` retries a 429 with the same
+  three-step backoff (`coingecko_client.dart`'s `_retryDelays`) on all
+  three network calls this file makes (the `fc.yahoo.com` cookie fetch, the
+  `getcrumb` call, and the actual `quoteSummary`/`fundamentals-timeseries`
+  request) before giving up.
 - `git` is not installed on the primary dev machine by default; when it is
   installed via winget mid-session, a *new* shell is needed before `git`
   resolves on PATH (the invoking shell keeps its stale PATH).

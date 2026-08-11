@@ -121,6 +121,31 @@ class _CrumbSession {
 final _crumbSession = _CrumbSession();
 const _crumbTtl = Duration(hours: 1);
 
+// coingecko_client.dart'taki fetchTopCryptoSymbols ile aynı desen: Render
+// gibi paylaşımlı bulut IP'lerinden Yahoo'nun crumb/veri uç noktaları da
+// (canlıda gözlemlendi: "Yahoo crumb alınamadı (429)") sık sık 429 dönüyor.
+// Üç kademeli, toplam ~26sn'lik bekleme sonrası vazgeçiyoruz — bir sekme
+// açılışının makul karşılayabileceği bir üst sınır.
+const _retryDelays = [
+  Duration(seconds: 3),
+  Duration(seconds: 8),
+  Duration(seconds: 15),
+];
+
+Future<http.Response> _getWithRetry(
+  http.Client client,
+  Uri uri,
+  Map<String, String> headers,
+) async {
+  var resp = await client.get(uri, headers: headers);
+  for (final delay in _retryDelays) {
+    if (resp.statusCode != 429) break;
+    await Future.delayed(delay);
+    resp = await client.get(uri, headers: headers);
+  }
+  return resp;
+}
+
 Future<void> _ensureCrumb(http.Client client, {bool forceRefresh = false}) async {
   final now = DateTime.now();
   if (!forceRefresh &&
@@ -130,17 +155,18 @@ Future<void> _ensureCrumb(http.Client client, {bool forceRefresh = false}) async
     return;
   }
 
-  final cookieResp =
-      await client.get(Uri.parse('https://fc.yahoo.com'), headers: {'User-Agent': userAgent});
+  final cookieResp = await _getWithRetry(
+      client, Uri.parse('https://fc.yahoo.com'), {'User-Agent': userAgent});
   final setCookie = cookieResp.headers['set-cookie'];
   if (setCookie == null) {
-    throw YahooException('Yahoo oturum çerezi alınamadı');
+    throw YahooException('Yahoo oturum çerezi alınamadı (${cookieResp.statusCode})');
   }
   final cookie = setCookie.split(';').first;
 
-  final crumbResp = await client.get(
+  final crumbResp = await _getWithRetry(
+    client,
     Uri.parse('https://query2.finance.yahoo.com/v1/test/getcrumb'),
-    headers: {'User-Agent': userAgent, 'Cookie': cookie},
+    {'User-Agent': userAgent, 'Cookie': cookie},
   );
   if (crumbResp.statusCode != 200 || crumbResp.body.trim().isEmpty) {
     throw YahooException('Yahoo crumb alınamadı (${crumbResp.statusCode})');
@@ -151,24 +177,21 @@ Future<void> _ensureCrumb(http.Client client, {bool forceRefresh = false}) async
   _crumbSession.fetchedAt = now;
 }
 
-/// [uri]'ye cookie+crumb ile GET atar; 401 alırsa crumb'ı bir kez zorla
-/// yeniler ve tekrar dener (crumb'ın sunucu tarafı ömrü bizim 1 saatlik
-/// TTL'imizden daha kısa olabilir).
+/// [uri]'ye cookie+crumb ile GET atar (429'da yukarıdaki gibi kademeli
+/// yeniden dener); 401 alırsa crumb'ı bir kez zorla yeniler ve tekrar dener
+/// (crumb'ın sunucu tarafı ömrü bizim 1 saatlik TTL'imizden daha kısa
+/// olabilir).
 Future<http.Response> _getWithCrumb(
   http.Client client,
   Uri Function(String crumb) buildUri,
 ) async {
   await _ensureCrumb(client);
-  var resp = await client.get(
-    buildUri(_crumbSession.crumb!),
-    headers: {'User-Agent': userAgent, 'Cookie': _crumbSession.cookie!},
-  );
+  var resp = await _getWithRetry(client, buildUri(_crumbSession.crumb!),
+      {'User-Agent': userAgent, 'Cookie': _crumbSession.cookie!});
   if (resp.statusCode == 401) {
     await _ensureCrumb(client, forceRefresh: true);
-    resp = await client.get(
-      buildUri(_crumbSession.crumb!),
-      headers: {'User-Agent': userAgent, 'Cookie': _crumbSession.cookie!},
-    );
+    resp = await _getWithRetry(client, buildUri(_crumbSession.crumb!),
+        {'User-Agent': userAgent, 'Cookie': _crumbSession.cookie!});
   }
   return resp;
 }
