@@ -5,6 +5,7 @@ import '../models/candle.dart';
 import '../models/interval.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
+import '../theme/app_colors.dart';
 import '../widgets/chart_result_section.dart';
 import '../widgets/favorite_symbols_bar.dart';
 import '../widgets/glass_card.dart';
@@ -18,16 +19,46 @@ class HomeScreen extends StatefulWidget {
   final MarketSymbol? requestedSymbol;
   final int requestId;
   final List<String> favorites;
+  // Seçili sembolün yanındaki yıldız butonu için — RootShell'deki tek
+  // favoriler listesini günceller (bkz. main.dart _toggleFavorite), diğer
+  // sekmelerdeki (Bildirimler, Favoriler) yıldızlarla aynı callback.
+  final ValueChanged<String>? onToggleFavorite;
 
   const HomeScreen({
     super.key,
     this.requestedSymbol,
     this.requestId = 0,
     this.favorites = const [],
+    this.onToggleFavorite,
   });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
+}
+
+/// Grafik sekmesinde incelenen sembolü doğrudan favorilere ekleyip
+/// çıkarabilmek için — Bildirimler/Favoriler sekmelerindeki yıldız
+/// ikonlarıyla aynı görsel dil (dolu/boş yıldız, emerald/slate renk).
+class _FavoriteToggleButton extends StatelessWidget {
+  final String symbol;
+  final bool isFavorite;
+  final ValueChanged<String>? onToggle;
+
+  const _FavoriteToggleButton({
+    required this.symbol,
+    required this.isFavorite,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onToggle == null ? null : () => onToggle!(symbol),
+      icon: Icon(isFavorite ? Icons.star : Icons.star_border),
+      color: isFavorite ? AppColors.emerald400 : AppColors.slate400,
+      tooltip: isFavorite ? 'Favorilerden çıkar' : 'Favorilere ekle',
+    );
+  }
 }
 
 class _HomeScreenState extends State<HomeScreen> {
@@ -182,8 +213,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   error: _error,
                   result: _result,
                   leadingActions: [
-                    if (_selectedSymbol != null)
+                    if (_selectedSymbol != null) ...[
                       Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
+                      _FavoriteToggleButton(
+                        symbol: _selectedSymbol!.symbol,
+                        isFavorite: widget.favorites.contains(_selectedSymbol!.symbol),
+                        onToggle: widget.onToggleFavorite,
+                      ),
+                    ],
                   ],
                 ),
               ],

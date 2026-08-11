@@ -8,6 +8,7 @@ import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../utils/price_format.dart';
 import '../utils/score_color.dart';
+import '../widgets/favorite_symbols_bar.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/symbol_search_field.dart';
 
@@ -21,7 +22,12 @@ import '../widgets/symbol_search_field.dart';
 /// TechnicalWatchlistStore) — favorites deseniyle aynı: bildirim üretmez,
 /// sadece bu sekmede hangi sembollerin analiz edileceğini belirler.
 class TechnicalScreen extends StatefulWidget {
-  const TechnicalScreen({super.key});
+  // Favoriler sekmesindeki listeyle aynı (bkz. main.dart RootShell): bir
+  // favoriye tıklamak onu doğrudan bu sekmenin izleme listesine ekler,
+  // arayıp bulmaya gerek kalmadan.
+  final List<String> favorites;
+
+  const TechnicalScreen({super.key, this.favorites = const []});
 
   @override
   State<TechnicalScreen> createState() => _TechnicalScreenState();
@@ -140,6 +146,20 @@ class _TechnicalScreenState extends State<TechnicalScreen> {
           ),
           const SizedBox(height: 12),
           SymbolSearchField(api: _api, onSelect: _addSymbol),
+          if (widget.favorites.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text('Favoriler', style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 8),
+            FavoriteSymbolsBar(
+              symbols: [
+                for (final s in widget.favorites) MarketSymbol(symbol: s, name: s),
+              ],
+              selected: _selectedSymbol == null
+                  ? null
+                  : MarketSymbol(symbol: _selectedSymbol!, name: _selectedSymbol!),
+              onSelect: _addSymbol,
+            ),
+          ],
           if (_watchlistError != null) ...[
             const SizedBox(height: 8),
             Text(_watchlistError!, style: const TextStyle(color: AppColors.rose500)),

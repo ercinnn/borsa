@@ -446,12 +446,19 @@ the Teknik score, and 50-symbols-per-page pagination — reads
 `TechnicalScoreCache`, see the backend section), while the notification
 feed below stays visible regardless of which sub-tab is selected),
 `FavoritesScreen` (search + favorite list),
-`TrackingScreen` (single-symbol intraday chart), and `TechnicalScreen`
-(Pivot Points/Moving Averages/Indicators + Buy-Sell summary for whatever
-symbols the user has added there — its own `TechnicalWatchlistStore`-backed
-list, independent of `HomeScreen`'s selection or the watchlist/favorites;
-see `technical_analysis.dart` in the backend section for the computation),
-and `ComparisonScreen` (2-4 symbols overlaid on one line chart, each
+`TrackingScreen` (single-symbol chart — interval chips are
+`ChartInterval.tracking`, see the interval section above), and
+`TechnicalScreen` (Pivot Points/Moving Averages/Indicators + Buy-Sell
+summary for whatever symbols the user has added there — its own
+`TechnicalWatchlistStore`-backed list, independent of `HomeScreen`'s
+selection or the watchlist/favorites; see `technical_analysis.dart` in the
+backend section for the computation; also renders a read-only
+`FavoriteSymbolsBar` above the watchlist chips — tapping a favorite calls
+the same `_addSymbol` the search field uses, so it's a shortcut into the
+existing add-and-select flow rather than a separate code path, and there's
+no star toggle *inside* this bar since favorite-ness itself is only ever
+changed from `HomeScreen`/`NotificationsScreen`/`FavoritesScreen`, see
+below), and `ComparisonScreen` (2-4 symbols overlaid on one line chart, each
 normalized to % change from its own first candle — no backend change
 needed, it's plain `/api/candles` calls per symbol; `widgets/
 comparison_chart.dart`'s doc comment explains the alignment tradeoff: since
@@ -499,7 +506,17 @@ own `MarketApi()` instance and don't share state — except favorites:
 `FavoritesScreen`, so a star toggled in one tab is immediately reflected in
 the others (IndexedStack builds all four tabs eagerly at login, not lazily
 per-visit, so without this lift each tab's own fetch-once-in-initState copy
-would drift out of sync with the others). Two cross-tab navigation flows
+would drift out of sync with the others). `TechnicalScreen` also receives
+`_favorites` (for the read-only bar above) but not `onToggleFavorite` — it
+can jump to a favorite, not un-favorite it, so it doesn't need the callback.
+`HomeScreen` is where the star itself lives day-to-day: a
+`_FavoriteToggleButton` next to the "Seçili: SYMBOL" chip in
+`ChartResultSection`'s `leadingActions` (filled/outline star matching the
+same visual language as the Bildirimler/Favoriler star icons) lets you
+favorite whatever you're currently charting without switching tabs first —
+previously favoriting only happened from `NotificationsScreen`/
+`FavoritesScreen`, so `HomeScreen` receiving `onToggleFavorite` at all is
+new. Two cross-tab navigation flows
 follow the same pattern: tapping a notification switches to Grafik with
 that symbol (`RootShell._openChartFor` → `HomeScreen.requestedSymbol`/
 `requestId`), and tapping the track icon next to a favorite switches to
@@ -548,8 +565,12 @@ its own for chart data.
 (`hourly`/`fourHour`/`daily`) values in one place since `MarketApi.candles`
 needs a single type either way, but no screen shows all seven at once:
 `HomeScreen` renders `ChartInterval.longTerm` chips, `TrackingScreen`
-renders `ChartInterval.intraday` chips — pick whichever list matches when
-adding a new interval rather than iterating `ChartInterval.values`.
+renders `ChartInterval.tracking` chips (intraday + weekly/monthly/quarterly,
+i.e. everything except the 12-month bucket — Takip's date-range picker was
+widened to match Grafik's `firstDate: DateTime(2000)` for this, since the
+old 1-year cap left almost nothing to show at monthly/quarterly zoom) —
+pick whichever list matches when adding a new interval rather than
+iterating `ChartInterval.values`.
 
 ## Deployment
 

@@ -96,9 +96,13 @@ class _TrackingScreenState extends State<TrackingScreen> {
   }
 
   Future<void> _pickDateRange() async {
+    // firstDate Grafik sekmesiyle aynı (DateTime(2000)): saat/4 saatlik gibi
+    // gün-içi aralıklar zaten Yahoo'nun kendi ~730 günlük geçmiş sınırına
+    // takılıyor (bkz. CLAUDE.md "Known rough edges"), ama haftalık/aylık/
+    // 3 aylık için daha eski bir başlangıç seçilebilmesi gerekiyor.
     final picked = await showDateRangePicker(
       context: context,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      firstDate: DateTime(2000),
       lastDate: DateTime.now(),
       initialDateRange: _dateRange,
     );
@@ -158,8 +162,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
           const SizedBox(height: 4),
           Text(
             'Favoriler sekmesinde bir sembolün yanındaki takip ikonuna '
-            'basarak buraya ekleyebilirsin. Aralık saat başı, 4 saatlik '
-            'veya günlük olarak değiştirilebilir.',
+            'basarak buraya ekleyebilirsin. Aralık saat başı, 4 saatlik, '
+            'günlük, haftalık, aylık veya 3 aylık olarak değiştirilebilir.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -181,7 +185,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
             ),
             const SizedBox(height: 16),
             ChartResultSection(
-              intervals: ChartInterval.intraday,
+              intervals: ChartInterval.tracking,
               selectedInterval: _interval,
               onSelectInterval: _selectInterval,
               dateRange: _dateRange,

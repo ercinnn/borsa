@@ -20,4 +20,11 @@ enum ChartInterval {
   // Takip sekmesi: tek bir sembolün güncel/kısa vadeli fiyat hareketini
   // izlemek için.
   static const intraday = [hourly, fourHour, daily];
+
+  // Takip sekmesindeki interval seçimi: gün-içi aralıklara ek olarak
+  // haftalık/aylık/3 aylık da eklenmiş hali — kullanıcı aynı sembolü aynı
+  // ekranda hem kısa hem orta vadeli görebilsin diye (longTerm'deki 12
+  // aylık hariç, Takip'in kullanım amacı Grafik'teki kadar uzun vadeli
+  // değil).
+  static const tracking = [hourly, fourHour, daily, weekly, monthly, quarterly];
 }

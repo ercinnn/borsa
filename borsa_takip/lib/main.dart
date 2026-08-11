@@ -356,6 +356,7 @@ class _RootShellState extends State<RootShell> {
               requestedSymbol: _chartRequestSymbol,
               requestId: _chartRequestId,
               favorites: _favorites,
+              onToggleFavorite: _toggleFavorite,
             )
           else
             const SizedBox.shrink(),
@@ -383,7 +384,7 @@ class _RootShellState extends State<RootShell> {
           else
             const SizedBox.shrink(),
           if (_visitedTabs.contains(4))
-            const TechnicalScreen()
+            TechnicalScreen(favorites: _favorites)
           else
             const SizedBox.shrink(),
           if (_visitedTabs.contains(5))
