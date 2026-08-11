@@ -94,7 +94,7 @@ class MarketApi {
     );
   }
 
-  /// preset: 'bist100', 'us100' veya 'crypto200'. Backend zaten bulk-add
+  /// preset: 'bist200', 'us200' veya 'crypto300'. Backend zaten bulk-add
   /// sonrası güncel tam listeyi döndürüyor (bkz. bin/server.dart
   /// _watchlistBulkAddHandler); çağıran taraf bunu doğrudan kullanmalı,
   /// ayrıca bir getWatchlist() ile tekrar sorgulamamalı.

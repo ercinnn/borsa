@@ -187,13 +187,19 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `yahoo_client.dart`'s `fetchChart()` also short-TTL-caches (2 min) by
   symbol+range+interval, shared with `/api/candles`.
 - `preset_lists.dart` / `coingecko_client.dart` — static curated symbol
-  lists (`bist100Symbols`, `usPopular100Symbols`, `cryptoFallbackSymbols`)
+  lists (`bist200Symbols`, `usPopular200Symbols`, `cryptoFallbackSymbols`)
   and a live CoinGecko top-N-by-market-cap fetch, used by
-  `/api/watchlist/bulk-add`. `fetchTopCryptoSymbols()` retries a few times
-  with backoff on CoinGecko 429s, optionally authenticated via
-  `COINGECKO_API_KEY` (`x-cg-demo-api-key` header, opt-in — see Deployment);
-  if all retries fail and there's no cached result, the `crypto200` handler
-  falls back to the static `cryptoFallbackSymbols` list rather than erroring.
+  `/api/watchlist/bulk-add`. `bist200Symbols`/`usPopular200Symbols` are each
+  exactly 200 entries (100 original + a second hand-picked 100/95 batch —
+  see the in-file comment for the source); `cryptoFallbackSymbols` is only
+  167 (deliberately short of 300 — it's a last-resort static backup for
+  when CoinGecko is fully unreachable, not a guaranteed top-300, so it
+  doesn't need to match the live count exactly). `fetchTopCryptoSymbols()`
+  retries a few times with backoff on CoinGecko 429s, optionally
+  authenticated via `COINGECKO_API_KEY` (`x-cg-demo-api-key` header, opt-in
+  — see Deployment); if all retries fail and there's no cached result, the
+  `crypto300` handler falls back to the static `cryptoFallbackSymbols` list
+  rather than erroring.
 - `technical_score_cache.dart` — `TechnicalScoreCache` powers the
   Bildirimler tab's "Puan Sıralaması" sub-tab: same batching pattern as
   `MonthlyLowChecker` (distinct symbols across all users' watchlists, 4 at a
@@ -648,7 +654,7 @@ iterating `ChartInterval.values`.
   `render.yaml` only declares the *names* (`sync: false`), never the values.
   `COINGECKO_API_KEY` is also declared there but optional: a free CoinGecko
   "Demo" key (from coingecko.com/en/developers/dashboard) raises the
-  crypto200 preset's rate limit well above the shared-IP anonymous tier;
+  crypto300 preset's rate limit well above the shared-IP anonymous tier;
   without it the proxy still works, just retries more and is more likely to
   fall back to the static crypto list under load. `ADMIN_SYNC_SECRET` is
   also declared and also optional, but with the opposite default: leaving
@@ -675,7 +681,7 @@ iterating `ChartInterval.values`.
 
 ## Known rough edges
 
-- BIST100/US-popular-100 preset lists are hand-curated snapshots, not a
+- BIST200/US-popular-200 preset lists are hand-curated snapshots, not a
   live index feed (Yahoo's actual "most active" screener needs
   cookie/crumb auth this specific preset-list code path doesn't implement
   — `yahoo_fundamentals.dart` *does* implement that handshake now, just for

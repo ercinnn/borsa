@@ -263,28 +263,28 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               runSpacing: 8,
               children: [
                 _PresetButton(
-                  label: 'BIST 100 Ekle',
-                  loading: _bulkAddingPreset == 'bist100',
-                  onPressed: () => _bulkAdd('bist100', 'BIST 100'),
+                  label: 'BIST 200 Ekle',
+                  loading: _bulkAddingPreset == 'bist200',
+                  onPressed: () => _bulkAdd('bist200', 'BIST 200'),
                 ),
                 _PresetButton(
-                  label: 'ABD Popüler 100 Ekle',
-                  loading: _bulkAddingPreset == 'us100',
-                  onPressed: () => _bulkAdd('us100', 'ABD Popüler 100'),
+                  label: 'ABD Popüler 200 Ekle',
+                  loading: _bulkAddingPreset == 'us200',
+                  onPressed: () => _bulkAdd('us200', 'ABD Popüler 200'),
                 ),
                 _PresetButton(
-                  label: 'Kripto İlk 200 Ekle',
-                  loading: _bulkAddingPreset == 'crypto200',
-                  onPressed: () => _bulkAdd('crypto200', 'Kripto İlk 200'),
+                  label: 'Kripto İlk 300 Ekle',
+                  loading: _bulkAddingPreset == 'crypto300',
+                  onPressed: () => _bulkAdd('crypto300', 'Kripto İlk 300'),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              'BIST 100 ve ABD Popüler 100 listeleri düzenli aralıklarla '
+              'BIST 200 ve ABD Popüler 200 listeleri düzenli aralıklarla '
               'güncellenen sabit/küratörlü listelerdir (Yahoo\'nun canlı "en '
               'çok işlem gören" verisi kimlik doğrulaması gerektirdiğinden '
-              'kullanılamıyor); Kripto İlk 200 ise CoinGecko\'dan piyasa '
+              'kullanılamıyor); Kripto İlk 300 ise CoinGecko\'dan piyasa '
               'değerine göre canlı çekilir.',
               style: Theme.of(context).textTheme.bodySmall,
             ),

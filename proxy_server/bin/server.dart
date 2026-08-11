@@ -107,10 +107,10 @@ Future<Response> _searchHandler(Request request) async {
     // GARAN.IS'i döndürmez (kelime kökü "Garan" birçok Avrupa fonunun adıyla
     // -"Garantita", "Garantizado" vb.- çakışıp GARAN.IS'i top-10'un dışına
     // itiyor), oysa tam "GARAN.IS" yazınca doğru sonucu veriyor. Bilinen
-    // BIST100/US100/crypto200 sembollerini burada prefiks eşleştirip Yahoo'nun
+    // BIST200/US200/crypto300 sembollerini burada prefiks eşleştirip Yahoo'nun
     // sonucunda yoksa başa ekliyoruz, böylece küratörlü listedeki semboller
     // Yahoo'nun sıralama tuhaflıklarından bağımsız her zaman aranabilir olur.
-    // Kripto listesi bulk-add'deki crypto200 preset'iyle aynı kaynağı
+    // Kripto listesi bulk-add'deki crypto300 preset'iyle aynı kaynağı
     // (fetchTopCryptoSymbols, 1 saatlik cache) ve aynı statik yedeği
     // (cryptoFallbackSymbols) paylaşıyor.
     final existingSymbols =
@@ -120,13 +120,13 @@ Future<Response> _searchHandler(Request request) async {
         symbol.split('.').first.startsWith(upperQuery) ||
         symbol.startsWith(upperQuery);
     final localMatches = <Map<String, dynamic>>[];
-    for (final sym in bist100Symbols) {
+    for (final sym in bist200Symbols) {
       if (matchesQuery(sym) && existingSymbols.add(sym)) {
         localMatches.add(
             {'symbol': sym, 'name': sym, 'exchange': 'BIST', 'type': 'EQUITY'});
       }
     }
-    for (final sym in usPopular100Symbols) {
+    for (final sym in usPopular200Symbols) {
       if (matchesQuery(sym) && existingSymbols.add(sym)) {
         localMatches.add(
             {'symbol': sym, 'name': sym, 'exchange': 'US', 'type': 'EQUITY'});
@@ -134,7 +134,7 @@ Future<Response> _searchHandler(Request request) async {
     }
     List<String> cryptoSymbols;
     try {
-      cryptoSymbols = await fetchTopCryptoSymbols(_httpClient, 200,
+      cryptoSymbols = await fetchTopCryptoSymbols(_httpClient, 300,
           apiKey: _coingeckoApiKey);
     } catch (e) {
       cryptoSymbols = cryptoFallbackSymbols;
@@ -798,15 +798,15 @@ Future<Response> _watchlistBulkAddHandler(
 
   List<String> symbols;
   switch (preset) {
-    case 'bist100':
-      symbols = bist100Symbols;
+    case 'bist200':
+      symbols = bist200Symbols;
       break;
-    case 'us100':
-      symbols = usPopular100Symbols;
+    case 'us200':
+      symbols = usPopular200Symbols;
       break;
-    case 'crypto200':
+    case 'crypto300':
       try {
-        symbols = await fetchTopCryptoSymbols(_httpClient, 200,
+        symbols = await fetchTopCryptoSymbols(_httpClient, 300,
             apiKey: _coingeckoApiKey);
       } catch (e) {
         stderr.writeln('CoinGecko fetch failed, statik yedek listeye düşülüyor: $e');
@@ -815,7 +815,7 @@ Future<Response> _watchlistBulkAddHandler(
       break;
     default:
       return _json(
-        {'error': 'Geçersiz preset: bist100, us100 veya crypto200 olmalı'},
+        {'error': 'Geçersiz preset: bist200, us200 veya crypto300 olmalı'},
         status: 400,
       );
   }

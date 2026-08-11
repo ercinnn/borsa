@@ -45,7 +45,7 @@ Flutter uygulaması bu adrese istek atacak şekilde ayarlıdır
 - Günlük, haftalık, aylık, 3 aylık, 12 aylık mum grafiği (ekrana otomatik sığdırılır)
 - Seçilen tarih aralığında aylık en düşük değer tablosu
 - İzleme listesi + günde bir kez otomatik "yeni ay içi dip" kontrolü
-- Tek tıkla BIST 100 / ABD popüler 100 / CoinGecko'dan canlı ilk 200 kripto ekleme
+- Tek tıkla BIST 200 / ABD popüler 200 / CoinGecko'dan canlı ilk 300 kripto ekleme
 - Sayfa başına 100 bildirim gösteren, en yeninin üstte olduğu bildirim listesi
 
 ## Notlar
@@ -53,7 +53,7 @@ Flutter uygulaması bu adrese istek atacak şekilde ayarlıdır
 - `proxy_server` sürekli açık kalmadığı sürece günlük otomatik kontrol
   çalışmaz; "Bildirimler" sekmesindeki "Şimdi Kontrol Et" butonuyla manuel
   tetikleyebilirsiniz.
-- BIST 100 ve ABD popüler 100 listeleri küratörlü/statik listelerdir (Yahoo
+- BIST 200 ve ABD popüler 200 listeleri küratörlü/statik listelerdir (Yahoo
   Finance'in canlı "en çok işlem gören" verisi ek kimlik doğrulama
   gerektirdiğinden kullanılamamıştır); kripto listesi CoinGecko'dan piyasa
   değerine göre canlı çekilir.
