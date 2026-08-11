@@ -405,6 +405,13 @@ Future<Response> _dividendsHandler(Request request) async {
   }
 }
 
+// yahoo_fundamentals.dart'ın kendi retry/timeout katmanları olsa da (bkz. o
+// dosyanın doc yorumları), bunların iç içe ne kadar sürebileceğini kesin
+// olarak öngörmek zor — burada kullanıcıya giden HTTP yanıtı için ayrı, sert
+// bir üst sınır koyuyoruz. Süre dolarsa hata döndürmek yerine DB'de o an ne
+// varsa onunla devam ediyoruz (aşağıdaki catch, [_withFreshFundamentals]).
+const _fundamentalsRequestTimeout = Duration(seconds: 25);
+
 /// Temel Analiz uç noktalarının hepsinin ortak akışı: [cache.ensureFresh]
 /// (DB'de 24 saatten eski/eksikse Yahoo'dan çekip yeniden hesaplar) sonrası
 /// ilgili Store'dan okuyup 404/YahooException/InsufficientDataException'ı
@@ -415,7 +422,14 @@ Future<Response> _withFreshFundamentals(
   Future<Response> Function() onFresh,
 ) async {
   try {
-    await cache.ensureFresh(symbol);
+    await cache.ensureFresh(symbol).timeout(_fundamentalsRequestTimeout);
+    return await onFresh();
+  } on TimeoutException {
+    // Yahoo tarafı beklenenden yavaş/tıkalı kaldı — kullanıcıyı süresiz
+    // bekletmek yerine DB'de o an ne varsa (stale veri ya da hiçbir şey)
+    // onunla devam ediyoruz. Arka plandaki yenileme denemesi
+    // (FundamentalsCache._inFlightRefreshes) kesilmez, sonraki istekte
+    // tamamlanmış olabilir.
     return await onFresh();
   } on YahooException catch (e) {
     return _json({'error': e.message}, status: 404);
@@ -448,6 +462,7 @@ Future<Response> _fundamentalsOverviewHandler(
       'pbRatio': row['pb_ratio'],
       'dividendYield': row['dividend_yield'],
       'updatedAt': row['updated_at'],
+      'stale': !cache.isFresh(row['updated_at'] as String?),
     });
   });
 }
@@ -468,6 +483,7 @@ Future<Response> _fundamentalsFairValueHandler(
       'error': row['fair_value_error'],
       'assumptions': row['dcf_assumptions'],
       'computedAt': row['computed_at'],
+      'stale': !cache.isFresh(row['computed_at'] as String?),
     });
   });
 }
@@ -490,6 +506,7 @@ Future<Response> _fundamentalsHealthScoreHandler(
       'piotroskiMaxScore': row['piotroski_max_score'],
       'piotroskiCriteria': row['piotroski_criteria'],
       'computedAt': row['computed_at'],
+      'stale': !cache.isFresh(row['computed_at'] as String?),
     });
   });
 }
@@ -507,6 +524,7 @@ Future<Response> _fundamentalsProTipsHandler(
       'symbol': row['symbol'],
       'tips': row['pro_tips'],
       'computedAt': row['computed_at'],
+      'stale': !cache.isFresh(row['computed_at'] as String?),
     });
   });
 }
@@ -1011,6 +1029,20 @@ void main(List<String> args) async {
   Timer.periodic(const Duration(hours: 4), (_) {
     technicalScoreCache.refreshAll().catchError((e) {
       stderr.writeln('Puan hesaplaması başarısız: $e');
+    });
+  });
+
+  // Temel Analiz için: açılışta bir kez, sonrasında 6 saatte bir arka planda
+  // ön-senkronizasyon (bkz. fundamentals_cache.dart syncWatchlistedSymbols —
+  // bilerek çok yavaş tempoda, MonthlyLowChecker/TechnicalScoreCache'in
+  // aksine amaç paralellik değil Yahoo'nun crumb endpoint'ine yayılmış yük).
+  // 24 saatlik DB cache TTL'sinden daha sık: cold start sonrası taze kalsın.
+  fundamentalsCache.syncWatchlistedSymbols(technicalWatchlist).catchError((e) {
+    stderr.writeln('İlk temel analiz senkronizasyonu başarısız: $e');
+  });
+  Timer.periodic(const Duration(hours: 6), (_) {
+    fundamentalsCache.syncWatchlistedSymbols(technicalWatchlist).catchError((e) {
+      stderr.writeln('Temel analiz senkronizasyonu başarısız: $e');
     });
   });
 

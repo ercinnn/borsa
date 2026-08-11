@@ -12,6 +12,11 @@ class StockOverview {
   final double? pbRatio;
   final double? dividendYield;
   final DateTime updatedAt;
+  /// true ise: Yahoo'dan canlı güncelleme başarısız oldu (ör. Render'ın
+  /// paylaşımlı IP'si crumb endpoint'inde geçici olarak engellendi) ve bu,
+  /// önceden senkronlanmış EN SON bilinen veri — bkz.
+  /// proxy_server/lib/fundamentals_cache.dart'ın stale-fallback davranışı.
+  final bool stale;
 
   const StockOverview({
     required this.symbol,
@@ -25,6 +30,7 @@ class StockOverview {
     this.pbRatio,
     this.dividendYield,
     required this.updatedAt,
+    this.stale = false,
   });
 
   factory StockOverview.fromJson(Map<String, dynamic> json) => StockOverview(
@@ -39,6 +45,7 @@ class StockOverview {
         pbRatio: (json['pbRatio'] as num?)?.toDouble(),
         dividendYield: (json['dividendYield'] as num?)?.toDouble(),
         updatedAt: DateTime.parse(json['updatedAt'] as String),
+        stale: json['stale'] as bool? ?? false,
       );
 }
 
@@ -75,6 +82,8 @@ class FairValueResult {
   final String? error;
   final DcfAssumptions assumptions;
   final DateTime computedAt;
+  /// bkz. StockOverview.stale doc yorumu.
+  final bool stale;
 
   const FairValueResult({
     required this.symbol,
@@ -83,6 +92,7 @@ class FairValueResult {
     this.error,
     required this.assumptions,
     required this.computedAt,
+    this.stale = false,
   });
 
   factory FairValueResult.fromJson(Map<String, dynamic> json) => FairValueResult(
@@ -92,6 +102,7 @@ class FairValueResult {
         error: json['error'] as String?,
         assumptions: DcfAssumptions.fromJson(json['assumptions'] as Map<String, dynamic>),
         computedAt: DateTime.parse(json['computedAt'] as String),
+        stale: json['stale'] as bool? ?? false,
       );
 }
 
@@ -124,6 +135,8 @@ class HealthScoreResult {
   final int piotroskiMaxScore;
   final List<PiotroskiCriterion> piotroskiCriteria;
   final DateTime computedAt;
+  /// bkz. StockOverview.stale doc yorumu.
+  final bool stale;
 
   const HealthScoreResult({
     required this.symbol,
@@ -134,6 +147,7 @@ class HealthScoreResult {
     required this.piotroskiMaxScore,
     required this.piotroskiCriteria,
     required this.computedAt,
+    this.stale = false,
   });
 
   factory HealthScoreResult.fromJson(Map<String, dynamic> json) => HealthScoreResult(
@@ -148,6 +162,7 @@ class HealthScoreResult {
             .map(PiotroskiCriterion.fromJson)
             .toList(),
         computedAt: DateTime.parse(json['computedAt'] as String),
+        stale: json['stale'] as bool? ?? false,
       );
 }
 
@@ -157,12 +172,20 @@ class ProTipsResult {
   final String symbol;
   final List<String> tips;
   final DateTime computedAt;
+  /// bkz. StockOverview.stale doc yorumu.
+  final bool stale;
 
-  const ProTipsResult({required this.symbol, required this.tips, required this.computedAt});
+  const ProTipsResult({
+    required this.symbol,
+    required this.tips,
+    required this.computedAt,
+    this.stale = false,
+  });
 
   factory ProTipsResult.fromJson(Map<String, dynamic> json) => ProTipsResult(
         symbol: json['symbol'] as String,
         tips: (json['tips'] as List).cast<String>(),
         computedAt: DateTime.parse(json['computedAt'] as String),
+        stale: json['stale'] as bool? ?? false,
       );
 }

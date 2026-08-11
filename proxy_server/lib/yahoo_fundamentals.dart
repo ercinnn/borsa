@@ -124,12 +124,19 @@ const _crumbTtl = Duration(hours: 1);
 // coingecko_client.dart'taki fetchTopCryptoSymbols ile aynı desen: Render
 // gibi paylaşımlı bulut IP'lerinden Yahoo'nun crumb/veri uç noktaları da
 // (canlıda gözlemlendi: "Yahoo crumb alınamadı (429)") sık sık 429 dönüyor.
-// Üç kademeli, toplam ~26sn'lik bekleme sonrası vazgeçiyoruz — bir sekme
-// açılışının makul karşılayabileceği bir üst sınır.
+// BİLEREK KISA TUTULUYOR (2 kademeli, ~11sn): bir tek istek zincirinde
+// (cookie → crumb → veri, gerekirse 401'de tekrar) bu bütçe BİRDEN FAZLA
+// yerde ayrı ayrı uygulanıyor (bkz. _fetchDataWithTimeout'un doc yorumu) —
+// uzun bir bütçe burada tek başına daha dayanıklı olmuyor, sadece kötü
+// senaryoda kullanıcıyı dakikalarca bekletiyor (canlıda gözlemlendi: 4
+// kademeli/~56sn'lik önceki bütçeyle bazı istekler 90 saniyeyi aştı).
+// Asıl dayanıklılık FundamentalsCache'teki stale-fallback + arka plan
+// ön-senkrondan geliyor — buradaki retry sadece gerçekten geçici (saniyeler
+// mertebesinde) bir yoğunluğu kurtarmak için, IP kalıcı engellenmişse zaten
+// işe yaramaz.
 const _retryDelays = [
   Duration(seconds: 3),
   Duration(seconds: 8),
-  Duration(seconds: 15),
 ];
 
 Future<http.Response> _getWithRetry(
@@ -146,15 +153,29 @@ Future<http.Response> _getWithRetry(
   return resp;
 }
 
-Future<void> _ensureCrumb(http.Client client, {bool forceRefresh = false}) async {
+// Temel Analiz sayfası bir sembolü açarken 4 endpoint'e (overview/fair-value/
+// health-score/protips) paralel istek atıyor (bkz. fundamentals_screen.dart);
+// hiç senkronlanmamış bir sembolde bu dördü backend'e aynı anda ulaşıyor.
+// Kilit olmadan her biri `crumb == null` görüp kendi fc.yahoo.com+getcrumb
+// turunu başlatırsa, Yahoo'nun crumb endpoint'ine tek sayfa açılışında 4 kat
+// yük biner — bu da zaten hassas olan bu endpoint'te 429 riskini büyütür
+// (canlıda gözlemlendi). Devam eden bir handshake varsa yeni çağrılar kendi
+// turlarını başlatmak yerine onu paylaşır.
+Future<void>? _inFlightCrumbFetch;
+
+Future<void> _ensureCrumb(http.Client client, {bool forceRefresh = false}) {
   final now = DateTime.now();
   if (!forceRefresh &&
       _crumbSession.crumb != null &&
       _crumbSession.fetchedAt != null &&
       now.difference(_crumbSession.fetchedAt!) < _crumbTtl) {
-    return;
+    return Future.value();
   }
+  return _inFlightCrumbFetch ??=
+      _fetchCrumb(client, now).whenComplete(() => _inFlightCrumbFetch = null);
+}
 
+Future<void> _fetchCrumb(http.Client client, DateTime now) async {
   final cookieResp = await _getWithRetry(
       client, Uri.parse('https://fc.yahoo.com'), {'User-Agent': userAgent});
   final setCookie = cookieResp.headers['set-cookie'];

@@ -137,6 +137,10 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `FavoritesStore` again (own `technical_watchlist` table, no seeding, no
   notification side-effects) — it's just which symbols the Teknik tab
   currently analyzes; unrelated to `WatchlistStore`/`FavoritesStore`.
+  `TechnicalWatchlistStore.allRows()` (mirrors `WatchlistStore.allRows()`)
+  returns every user's `(user_id, symbol)` pairs; `fundamentals_cache.dart`'s
+  background pre-sync job uses it to find the distinct symbol set to keep
+  warm, since Temel Analiz reuses the same watchlist as Teknik.
   `PortfolioStore` backs the Portföy tab: one row per `(user_id, symbol)`
   (unique index, upserted via `resolution=merge-duplicates` — same pattern
   as `TrackedSymbolStore.setFor`), storing only `quantity`/`cost_basis`.
@@ -299,6 +303,20 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   401) — discovered live during implementation: Yahoo's `quoteSummary` and
   `fundamentals-timeseries` endpoints reject the bare-`User-Agent` requests
   every other `yahoo_*` fetch in this codebase uses (`401 Invalid Crumb`).
+  `_ensureCrumb()` dedups concurrent callers via a module-level
+  `Future<void>? _inFlightCrumbFetch` — every request that arrives while a
+  handshake is already running awaits that same `Future` instead of
+  starting its own (see `fundamentals_cache.dart` below for why this
+  matters: the frontend fires 4 parallel requests per symbol view, and
+  without this a single page open could hit Yahoo's crumb endpoint 4x
+  concurrently). `_retryDelays` is deliberately short (two steps, ~11s
+  total) — a longer budget was tried and reverted after live testing
+  showed retries compounding across this file's multiple sequential Yahoo
+  calls (cookie, crumb, data) *and* across `fetchStockOverview`+
+  `fetchFinancialHistory` in one `refresh()`, pushing some requests past
+  90s; real reliability now comes from the dedup here plus the
+  stale-fallback and background pre-sync in `fundamentals_cache.dart`, not
+  from a long retry budget.
   `fetchStockOverview()` hits `quoteSummary` (`assetProfile`/`price`/
   `summaryDetail`/`financialData`/`defaultKeyStatistics` modules) for a
   single-period snapshot (sector, country, market cap, PE/PB, dividend
@@ -338,14 +356,40 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   fundamentals instead of price action).
 - `fundamentals_cache.dart` — `FundamentalsCache` is the DB-backed
   counterpart to `TechnicalScoreCache`'s in-memory one: `ensureFresh()`
-  checks the `stocks` table's `updated_at` and only calls Yahoo (via the
-  fetchers above) + recomputes (via the calculators above) + upserts all
-  three tables if missing or older than 24h; otherwise the GET handlers just
-  read straight from Supabase. Storing this in Postgres rather than an
-  in-memory map (unlike `TechnicalScoreCache`) matters specifically here
-  because Render's free tier wipes in-memory state on every cold start —
-  this cache survives that. `refresh()` (used directly by the admin-sync
-  endpoint below) skips the freshness check entirely.
+  checks the `stock_scores` table's `computed_at` (not `stocks.updated_at`
+  — `scores` is the last of the three tables `refresh()` writes, so its
+  timestamp is the only one that reflects "the full pipeline actually
+  completed"; a partial failure between `stocks` and `stock_scores` would
+  make an `updated_at`-based check wrongly call itself fresh forever) and
+  only calls Yahoo (via the fetchers above) + recomputes (via the
+  calculators above) + upserts all three tables if missing or older than
+  24h; otherwise the GET handlers just read straight from Supabase.
+  Storing this in Postgres rather than an in-memory map (unlike
+  `TechnicalScoreCache`) matters specifically here because Render's free
+  tier wipes in-memory state on every cold start — this cache survives
+  that. `refresh()` dedups concurrent callers per-symbol via a
+  `Map<String, Future<void>>` (`_inFlightRefreshes`, same pattern as
+  `yahoo_fundamentals.dart`'s crumb dedup above — needed because the
+  frontend's 4 parallel per-symbol requests would otherwise each trigger
+  their own full Yahoo fetch+recompute+upsert). Each Yahoo call inside
+  `refresh()` is wrapped in a 20s `_yahooFetchTimeout`; if Yahoo still
+  fails (429, timeout, or otherwise) and a previously-synced row already
+  exists for that symbol, `refresh()` silently falls back to leaving the
+  stale row untouched instead of throwing (same "fall back to last known
+  result" pattern `coingecko_client.dart` already uses) — the GET handlers
+  below surface this as `stale: true` in the JSON rather than an error
+  page. Only a symbol's *first-ever* view (no prior row to fall back to)
+  still surfaces a hard error. `syncWatchlistedSymbols()` is a background
+  job (registered in `main()` below, same trigger pattern as
+  `TechnicalScoreCache`'s refresh) that walks every distinct symbol across
+  all users' `TechnicalWatchlistStore` rows and calls `ensureFresh()` on
+  each — deliberately sequential with a 4s pause *after each symbol that
+  actually hit Yahoo* (already-fresh symbols are skipped instantly, no
+  wait), unlike `MonthlyLowChecker`'s 4-wide-parallel-batches-every-300ms:
+  the goal here isn't throughput, it's keeping load on Yahoo's rate-limit-
+  sensitive crumb endpoint low and spread out, so that by the time a user
+  actually opens Temel Analiz for a watchlisted symbol it's typically
+  already synced and their request never touches Yahoo at all.
   `StockStore`/`FinancialStatementStore`/`StockScoreStore` (bkz.
   `store.dart`) back the three tables and are the only Store classes in this
   codebase that **don't** take a `userId` — `stocks`/`financial_statements`/
@@ -409,7 +453,16 @@ reads straight from the `stocks`/`stock_scores` tables after
 `fair-value` and `health-score` both include an `error` string field
 (`error`/`altmanError`) that's non-null instead of the numeric fields when
 that particular calculation isn't available for the symbol, e.g. bank
-stocks — the frontend shows that message rather than a bare `null`),
+stocks — the frontend shows that message rather than a bare `null`). All
+four are wrapped by `_withFreshFundamentals()` in `bin/server.dart`, which
+adds a 25s handler-level timeout around `ensureFresh()` as a defense-in-
+depth ceiling on top of `fundamentals_cache.dart`'s own per-call timeouts
+— on timeout it falls through to whatever's already in the DB (fresh or
+stale) rather than hanging the request. Each response also includes a
+`stale` boolean (`FundamentalsCache.isFresh()` against `updated_at` for
+`overview`, `computed_at` for the other three) so the frontend can show a
+"veriler güncellenemedi, en son bilinen veriler gösteriliyor" banner
+instead of silently serving old numbers as if they were current,
 `admin/sync-stock/{symbol}` (POST, **not** Supabase-authenticated — guarded
 by an `X-Admin-Secret` header checked against the `ADMIN_SYNC_SECRET` env
 var; endpoint is fully disabled (503) if that var isn't set, so there's no
@@ -498,7 +551,15 @@ for a symbol — the common case being Altman Z-Score and two Piotroski
 criteria for banks/financial-sector stocks — the card shows the backend's
 `error` string instead of a bare blank value; see `fundamental_analysis.dart`
 and `fundamentals_cache.dart` in the backend section for the computation,
-simplifying assumptions, and DB-backed caching).
+simplifying assumptions, and DB-backed caching. All four models
+(`StockOverview`/`FairValueResult`/`HealthScoreResult`/`ProTipsResult` in
+`models/fundamentals.dart`) carry the backend's `stale` boolean; if any of
+them is `true` for the currently-selected symbol,
+`_FundamentalsResultView` shows a warning banner above the rest of the
+page ("Veriler şu an güncellenemedi ... en son bilinen veriler
+gösteriliyor") instead of silently presenting old numbers as current — see
+the `stale`-fallback behavior in `fundamentals_cache.dart` above for when
+this triggers).
 Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an
@@ -628,15 +689,36 @@ iterating `ChartInterval.values`.
   throwing `YahooException`s (surfaced as 404s to the frontend) until the
   handshake is updated — this is a meaningfully higher-risk dependency than
   everything else in `yahoo_client.dart`. Separately (and observed live in
-  production, not just theoretical): Yahoo rate-limits this handshake
-  more aggressively from Render's shared cloud IPs than from a residential
-  dev machine — the exact same "Render IP gets 429'd, my laptop doesn't"
-  problem `coingecko_client.dart` already has a comment about. Fixed with
-  the identical pattern: `_getWithRetry()` retries a 429 with the same
-  three-step backoff (`coingecko_client.dart`'s `_retryDelays`) on all
-  three network calls this file makes (the `fc.yahoo.com` cookie fetch, the
-  `getcrumb` call, and the actual `quoteSummary`/`fundamentals-timeseries`
-  request) before giving up.
+  production repeatedly — first traced through with `ISBTR.IS`, then again
+  with `BJKAS.IS`): Yahoo rate-limits this handshake more aggressively from
+  Render's shared cloud IPs than from a residential dev machine — the exact
+  same "Render IP gets 429'd, my laptop doesn't" problem
+  `coingecko_client.dart` already has a comment about, confirmed live
+  (same-moment request from a dev machine got an instant 200 from
+  `getcrumb` while Render's IP exhausted its full retry budget and still
+  got 429). That's compounded by a **self-inflicted** second cause found
+  during the same investigation: `FundamentalsScreen` fires its 4
+  `overview`/`fair-value`/`health-score`/`protips` requests in parallel per
+  symbol view, and with no coordination each one independently triggered
+  its own crumb handshake — a single page open could hit Yahoo's crumb
+  endpoint 4x concurrently, worse than the external rate-limit alone.
+  Addressed with a multi-layer fix rather than a single retry tweak (a
+  first attempt that just widened the retry budget made things *worse* —
+  retries compound across this file's sequential Yahoo calls and across
+  both fetchers inside one `refresh()`, and a live test hung 90+ seconds
+  before that was caught and reverted): concurrent-request dedup at both
+  the crumb-handshake layer (`yahoo_fundamentals.dart`) and the
+  per-symbol-refresh layer (`fundamentals_cache.dart`), a short bounded
+  retry budget (~11s) plus per-call and per-handler timeouts instead of a
+  long one, a stale-data fallback so a failed live refresh serves the last
+  known good row (flagged `stale: true`) instead of erroring, and a slow
+  background pre-sync job so watchlisted symbols are typically already
+  fresh before a user ever opens Temel Analiz for them — see
+  `yahoo_fundamentals.dart` and `fundamentals_cache.dart` in the
+  Architecture section above for the specifics of each layer. A symbol's
+  very first-ever view (nothing to fall back to) can still surface a hard
+  error if Yahoo is actively rate-limiting at that moment — this is now
+  the only case that isn't fully absorbed by the fix.
 - `git` is not installed on the primary dev machine by default; when it is
   installed via winget mid-session, a *new* shell is needed before `git`
   resolves on PATH (the invoking shell keeps its stale PATH).

@@ -151,6 +151,13 @@ class TechnicalWatchlistStore {
     });
     return deleted.isNotEmpty;
   }
+
+  /// Temel Analiz'in arka plan ön-senkronizasyonu için: tüm kullanıcıların
+  /// tüm sembolleri (bkz. fundamentals_cache.dart syncWatchlistedSymbols) —
+  /// `WatchlistStore.allRows()` ile aynı desen.
+  Future<List<Map<String, dynamic>>> allRows() {
+    return _table.select(columns: 'user_id,symbol');
+  }
 }
 
 /// Temettü sekmesinde kullanıcının takip için eklediği semboller.

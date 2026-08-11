@@ -284,11 +284,39 @@ class _FundamentalsResultView extends StatelessWidget {
     required this.dateFormat,
   });
 
+  bool get _anyStale =>
+      overview.stale || fairValue.stale || healthScore.stale || proTips.stale;
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_anyStale)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.slate400.withValues(alpha: 0.12),
+              border: Border.all(color: AppColors.slate400.withValues(alpha: 0.4)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 16, color: AppColors.slate400),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Veriler şu an güncellenemedi (Yahoo Finance geçici olarak '
+                    'erişilemez durumda) — en son bilinen veriler gösteriliyor '
+                    '(${dateFormat.format(overview.updatedAt.toLocal())}).',
+                    style: const TextStyle(fontSize: 12, color: AppColors.slate400),
+                  ),
+                ),
+              ],
+            ),
+          ),
         GlassCard(
           glow: true,
           child: Column(
