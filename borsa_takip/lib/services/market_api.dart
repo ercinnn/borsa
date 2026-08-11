@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/candle.dart';
+import '../models/dividend.dart';
 import '../models/interval.dart';
 import '../models/notification_item.dart';
 import '../models/portfolio.dart';
@@ -199,6 +200,43 @@ class MarketApi {
   Future<bool> refreshTechnicalScores() async {
     final resp = await _post(Uri.parse('$_baseUrl/api/technical-scores/refresh'), {});
     return resp['started'] as bool? ?? false;
+  }
+
+  /// Bir sembolün son 15 yıllık temettü geçmişi (bkz. models/dividend.dart,
+  /// proxy_server/lib/yahoo_client.dart fetchDividends). `/api/technical`
+  /// gibi auth gerektirmez.
+  Future<DividendHistory> getDividends(String symbol) async {
+    final uri = Uri.parse('$_baseUrl/api/dividends')
+        .replace(queryParameters: {'symbol': symbol});
+    final resp = await _get(uri);
+    return DividendHistory.fromJson(resp);
+  }
+
+  Future<List<String>> getDividendWatchlist() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/dividend-watchlist'));
+    return (resp['symbols'] as List).cast<String>();
+  }
+
+  Future<({String symbol, bool added})> addToDividendWatchlist(String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/dividend-watchlist/add'),
+      {'symbol': symbol},
+    );
+    return (
+      symbol: resp['symbol'] as String,
+      added: resp['added'] as bool? ?? false,
+    );
+  }
+
+  Future<({String symbol, bool removed})> removeFromDividendWatchlist(String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/dividend-watchlist/remove'),
+      {'symbol': symbol},
+    );
+    return (
+      symbol: resp['symbol'] as String,
+      removed: resp['removed'] as bool? ?? false,
+    );
   }
 
   /// Portföy sekmesi: pozisyonlar + canlı fiyat/TL karşılığıyla hesaplanmış

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/symbol.dart';
 import 'screens/comparison_screen.dart';
+import 'screens/dividend_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -259,6 +260,7 @@ class _RootShellState extends State<RootShell> {
     'Teknik',
     'Karşılaştır',
     'Portföy',
+    'Temettü',
   ];
 
   @override
@@ -388,6 +390,10 @@ class _RootShellState extends State<RootShell> {
             const PortfolioScreen()
           else
             const SizedBox.shrink(),
+          if (_visitedTabs.contains(7))
+            const DividendScreen()
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -402,6 +408,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.query_stats), label: 'Teknik'),
           NavigationDestination(icon: Icon(Icons.compare_arrows), label: 'Karşılaştır'),
           NavigationDestination(icon: Icon(Icons.pie_chart), label: 'Portföy'),
+          NavigationDestination(icon: Icon(Icons.payments), label: 'Temettü'),
         ],
       ),
     );

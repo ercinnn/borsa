@@ -153,6 +153,45 @@ class TechnicalWatchlistStore {
   }
 }
 
+/// Temettü sekmesinde kullanıcının takip için eklediği semboller.
+/// TechnicalWatchlistStore ile aynı desen: watchlist/favorites/teknik
+/// listeden bağımsız, bildirim üretmez — yalnızca hangi sembollerin Temettü
+/// sekmesinde gösterileceğini belirler.
+class DividendWatchlistStore {
+  final SupabaseTable _table;
+
+  DividendWatchlistStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'dividend_watchlist');
+
+  Future<List<String>> symbolsFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'symbol',
+      filters: {'user_id': 'eq.$userId', 'order': 'symbol.asc'},
+    );
+    return rows.map((r) => r['symbol'] as String).toList();
+  }
+
+  Future<bool> add(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty) return false;
+    final inserted = await _table.insert(
+      {'user_id': userId, 'symbol': normalized},
+      onConflict: 'user_id,symbol',
+      prefer: 'resolution=ignore-duplicates,return=representation',
+    );
+    return inserted.isNotEmpty;
+  }
+
+  Future<bool> remove(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    final deleted = await _table.delete({
+      'user_id': 'eq.$userId',
+      'symbol': 'eq.$normalized',
+    });
+    return deleted.isNotEmpty;
+  }
+}
+
 class PortfolioHoldingRow {
   final String symbol;
   final double quantity;

@@ -104,10 +104,21 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
 - `yahoo_client.dart` — `fetchChart()` is the one shared function that hits
   Yahoo's `/v8/finance/chart/{symbol}` endpoint and parses OHLC candles.
   Both `/api/candles` and the monthly-low checker call it — don't duplicate
-  Yahoo-parsing logic elsewhere.
+  Yahoo-parsing logic elsewhere. `fetchDividends()` is a separate function in
+  the same file (shares the `userAgent`/`YahooException` plumbing but issues
+  its own request, since a plain OHLC request doesn't return dividend data):
+  it hits the same chart endpoint with `events=div` and parses
+  `chart.result[0].events.dividends` (keyed by timestamp, each value an
+  `{amount, date}` pair) into a newest-first `List<DividendEvent>`. Bounded
+  to the last 15 years rather than Yahoo's full history — BIST symbols'
+  pre-2005 (pre-redenomination "eski TL") dividend amounts come back in the
+  millions and would be misleading to show as-is. Has its own 6-hour cache
+  (dividends change far less often than prices), keyed by symbol only and
+  shared between `/api/dividends` and the portfolio dividend-income
+  calculation below.
 - `store.dart` — `WatchlistStore`, `NotificationStore`, `FavoritesStore`,
-  `TrackedSymbolStore`, `TechnicalWatchlistStore`, all persisted in a
-  Supabase Postgres project via
+  `TrackedSymbolStore`, `TechnicalWatchlistStore`, `DividendWatchlistStore`,
+  all persisted in a Supabase Postgres project via
   `supabase_client.dart` (a minimal PostgREST wrapper, not the official
   SDK). Multi-tenant: every method takes a `userId` and queries Supabase
   filtered to that user (no in-memory cache — a single-user leftover from
@@ -132,13 +143,18 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   Re-adding a symbol already held **overwrites** it rather than merging a
   weighted-average cost — a deliberate simplification (see
   `portfolio_summary.dart` below and `PortfolioScreen`'s doc comment).
+  `DividendWatchlistStore` is the same shape as `TechnicalWatchlistStore`
+  again (own `dividend_watchlist` table, no seeding, no notification
+  side-effects) — it's just which symbols the Temettü tab shows; unrelated
+  to `WatchlistStore`/`FavoritesStore`/`PortfolioStore`.
   Table schema: `proxy_server/supabase_schema.sql` +
   `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` +
-  `supabase_schema_technical.sql` + `supabase_schema_portfolio.sql` (run
-  once each, in order, in the Supabase SQL Editor — the second adds
-  `user_id` and RLS to the base tables, the third adds the `favorites` and
-  `tracked_symbol` tables, the fourth adds `technical_watchlist`, the fifth
-  adds `portfolio_holdings`). Requires `SUPABASE_URL` and
+  `supabase_schema_technical.sql` + `supabase_schema_portfolio.sql` +
+  `supabase_schema_dividends.sql` (run once each, in order, in the Supabase
+  SQL Editor — the second adds `user_id` and RLS to the base tables, the
+  third adds the `favorites` and `tracked_symbol` tables, the fourth adds
+  `technical_watchlist`, the fifth adds `portfolio_holdings`, the sixth adds
+  `dividend_watchlist`). Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -240,7 +256,17 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   request rather than cached in the background — portfolios are small
   (a handful of holdings), so a live `Future.wait` over them is fast
   enough, and freshness matters more here than for the 400-symbol
-  watchlist scan.
+  watchlist scan. Each holding also gets an estimated dividend income: a
+  second `fetchDividends` call (failures here are swallowed — a missing
+  dividend history doesn't break the price/P&L part of the holding) sums
+  the last-15-years per-share dividends and multiplies by the held
+  quantity. This is a **deliberate simplification** flagged in both the
+  backend field docs and `PortfolioScreen`'s summary card: it assumes the
+  current quantity was held for the *entire* 15-year window, ignoring when
+  the position was actually bought — same "don't overbuild it" spirit as
+  `PortfolioStore`'s overwrite-not-merge choice above. Converted to TRY with
+  the same `_convertToTry` helper and summed into
+  `PortfolioSummary.totalDividendIncomeTry`.
 
 `GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
 as a target for Render's health check; `/api/*` routes are the wrong choice
@@ -274,13 +300,18 @@ same shape as `favorites` — which symbols the Teknik tab shows), `portfolio`
 (GET returns a full `PortfolioSummary` — live prices + TRY totals computed
 fresh each call, see `portfolio_summary.dart` above; `add`/`remove` take
 `{symbol, quantity, costBasis}`/`{symbol}`, `add` is an upsert-overwrite
-not a merge), `notifications` (paginated, 100/page, newest first),
+not a merge), `dividends` (GET, params: `symbol` — public, returns
+`{symbol, currency, dividends: [{date, amount}], totalPerShare}`, see
+`fetchDividends()` above), `dividend-watchlist` (GET/add/remove, same shape
+as `favorites`/`technical-watchlist` — which symbols the Temettü tab
+shows), `notifications` (paginated, 100/page, newest first),
 `notifications/check-now` (fire-and-forget — does NOT await the full scan,
 since a large watchlist can take minutes; guarded by a module-level
 `_checkInProgress` flag against overlapping runs). All
 `watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`portfolio*`/
-`notifications*` endpoints require `Authorization: Bearer <token>` (see Auth above);
-`search`/`candles`/`technical`/`health` don't.
+`dividend-watchlist*`/`notifications*` endpoints require `Authorization:
+Bearer <token>` (see Auth above); `search`/`candles`/`technical`/
+`dividends`/`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
 `Timer.periodic(Duration(hours: 24))` — this only fires while the process
@@ -291,7 +322,7 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of seven tab screens behind a bottom `NavigationBar`:
+`IndexedStack` of eight tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
 notification feed — its watchlist-management area itself has two sub-tabs,
 "İzleme Listesi" (the existing add/remove/preset UI) and "Puan Sıralaması"
@@ -315,13 +346,20 @@ comparison_chart.dart`'s doc comment explains the alignment tradeoff: since
 symbols can trade on different calendars — BIST closed weekends, crypto
 7/24 — series are truncated to the shortest one's length, aligned so
 *today* lines up for all of them, rather than attempting real calendar-date
-alignment from the pre-formatted `period` strings), and `PortfolioScreen`
+alignment from the pre-formatted `period` strings), `PortfolioScreen`
 (add/edit/remove positions by symbol+quantity+cost, live P&L, a
 `CustomPainter` donut allocation chart — `widgets/
 portfolio_allocation_chart.dart`, no charting package, same approach as
-`CandlestickChart` — and a single TRY-denominated total; see
-`portfolio_summary.dart` in the backend section for the USD→TRY conversion
-this depends on).
+`CandlestickChart` — a single TRY-denominated total, and (per holding, plus
+a portfolio-wide total in the summary card) an estimated dividend income
+figure with an inline caveat that it assumes the current quantity was held
+for the full 15-year window; see `portfolio_summary.dart` in the backend
+section for both the USD→TRY conversion and the dividend-income caveat in
+full), and `DividendScreen` (Temettü tab: own `DividendWatchlistStore`-backed
+symbol list, independent of every other tab's selection — same
+watchlist-chip pattern as `TechnicalScreen`; selecting a symbol shows its
+raw `/api/dividends` history as a date+amount table, no quantity/income math
+here, that's `PortfolioScreen`'s job).
 Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an
@@ -436,6 +474,24 @@ adding a new interval rather than iterating `ChartInterval.values`.
   each other live) — a second device/tab, or the same app after a full
   reload, only sees the latest state from its own next `/api/favorites`
   fetch, not proactively.
+
+## Planned / not yet implemented
+
+Discussed and deliberately deferred (this is meaningfully bigger than the
+features shipped alongside Portföy/Temettü — Puan Değişim Bildirimi,
+Karşılaştırmalı Grafik, RSI/MACD Paneli, Temettü Takibi — each of which took
+its own session-slice; this is next up):
+
+- **Backtesting** ("bu puan eşiğine göre alım-satım yapsaydım geçmişte nasıl
+  performans verirdi" simulation). Blocker: `TechnicalScoreCache` only ever
+  holds each symbol's *current* score — there's no historical score series
+  to simulate against. `computeTechnicalAnalysis()` can already compute a
+  score for an arbitrary trailing candle window, so a backtest would mean
+  repeatedly calling it with a rolling/truncated `candles` list (one call
+  per simulated day) rather than needing new indicator math — but that's a
+  lot of repeated computation per backtest run, and needs its own
+  rate-limit-aware batching story (unlike `TechnicalScoreCache`, which only
+  ever needs *one* fresh value per symbol).
 
 ## UI/UX Tasarım Kuralları
 

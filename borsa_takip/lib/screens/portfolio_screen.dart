@@ -279,6 +279,21 @@ class _SummaryCard extends StatelessWidget {
               style: const TextStyle(fontSize: 11, color: AppColors.slate400),
             ),
           ],
+          if (summary.totalDividendIncomeTry > 0) ...[
+            const SizedBox(height: 8),
+            Text('Tahmini Temettü Geliri', style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 2),
+            Text(
+              '${formatPrice(summary.totalDividendIncomeTry)} TRY',
+              style: GoogleFonts.robotoMono(
+                  fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.emerald400),
+            ),
+            Text(
+              'Son 15 yılın hisse başı temettüsü × mevcut adet varsayılarak; '
+              'ne zaman satın aldığın hesaba katılmaz.',
+              style: const TextStyle(fontSize: 11, color: AppColors.slate400),
+            ),
+          ],
         ],
       ),
     );
@@ -322,6 +337,11 @@ class _HoldingTile extends StatelessWidget {
                     Text(
                       'Güncel: ${formatPrice(h.currentValue!)} ${h.currency}',
                       style: GoogleFonts.robotoMono(fontSize: 11, color: AppColors.slate400),
+                    ),
+                  if (h.estimatedDividendIncome != null && h.estimatedDividendIncome! > 0)
+                    Text(
+                      'Tahmini temettü: ${formatPrice(h.estimatedDividendIncome!)} ${h.currency}',
+                      style: GoogleFonts.robotoMono(fontSize: 11, color: AppColors.emerald400),
                     ),
                 ],
               ),

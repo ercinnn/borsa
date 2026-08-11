@@ -126,3 +126,111 @@ Future<ChartData> fetchChart(
   _cache[cacheKey] = _CacheEntry(data, DateTime.now().add(_cacheTtl));
   return data;
 }
+
+class DividendEvent {
+  final DateTime date;
+  final num amount;
+  DividendEvent(this.date, this.amount);
+}
+
+class DividendData {
+  final String currency;
+  /// Yeniden eskiye sıralı.
+  final List<DividendEvent> dividends;
+  DividendData(this.currency, this.dividends);
+}
+
+class _DividendCacheEntry {
+  final DividendData data;
+  final DateTime expiresAt;
+  _DividendCacheEntry(this.data, this.expiresAt);
+}
+
+// Temettü verisi fiyat mumlarına göre çok daha seyrek değiştiğinden
+// (yılda birkaç kez) fetchChart'ın 2 dakikalık cache'inden ayrı, çok daha
+// uzun ömürlü kendi cache'i var — aynı sembol hem /api/dividends'ten hem de
+// portföydeki her bir holding için ayrı ayrı istenebiliyor (bkz.
+// portfolio_summary.dart), bu ikisi arasında da paylaşılıyor.
+final _dividendCache = <String, _DividendCacheEntry>{};
+const _dividendCacheTtl = Duration(hours: 6);
+const _dividendCacheMaxEntries = 500;
+
+void _pruneDividendCache() {
+  final now = DateTime.now();
+  _dividendCache.removeWhere((_, entry) => entry.expiresAt.isBefore(now));
+  if (_dividendCache.length > _dividendCacheMaxEntries) _dividendCache.clear();
+}
+
+/// Yahoo Finance chart uç noktasını `events=div` parametresiyle çekip bir
+/// sembolün tüm bilinen temettü geçmişini (tarih + hisse başı tutar) döner.
+/// `/api/dividends` ve portföydeki tahmini temettü geliri hesaplaması
+/// (bkz. portfolio_summary.dart) tarafından paylaşılır — fetchChart ile aynı
+/// HTTP altyapısını (userAgent, hata sınıfı) kullanır ama ayrı bir istek
+/// atar, çünkü fetchChart'ın normal OHLC isteği events verisini içermiyor.
+Future<DividendData> fetchDividends(http.Client client, String symbol) async {
+  _pruneDividendCache();
+  final cached = _dividendCache[symbol];
+  if (cached != null && cached.expiresAt.isAfter(DateTime.now())) {
+    return cached.data;
+  }
+
+  final now = DateTime.now().toUtc();
+  final period2 = now.millisecondsSinceEpoch ~/ 1000 + 86400;
+  // period1=0 (Yahoo'nun tüm geçmişi) yerine son 15 yılla sınırlıyoruz: BIST
+  // sembolleri için 2005 öncesi (eski TL / redenominasyon öncesi) temettü
+  // tutarları milyonlarca "eski TL" olarak dönüyor ve kullanıcıya anlamsız/
+  // yanıltıcı görünüyor; 15 yıl kişisel temettü takibi için zaten yeterince
+  // geniş bir pencere.
+  final period1 =
+      now.subtract(const Duration(days: 365 * 15)).millisecondsSinceEpoch ~/ 1000;
+
+  final uri = Uri.https(
+    'query1.finance.yahoo.com',
+    '/v8/finance/chart/$symbol',
+    {
+      'period1': '$period1',
+      'period2': '$period2',
+      'interval': '1mo',
+      'events': 'div',
+    },
+  );
+
+  final resp = await client.get(uri, headers: {'User-Agent': userAgent});
+  if (resp.statusCode != 200) {
+    throw YahooException('Yahoo chart isteği başarısız (${resp.statusCode})');
+  }
+
+  final body = jsonDecode(resp.body) as Map<String, dynamic>;
+  final chart = body['chart'] as Map<String, dynamic>?;
+  if (chart?['error'] != null) {
+    throw YahooException('Sembol bulunamadı: $symbol');
+  }
+  final results = chart?['result'] as List?;
+  if (results == null || results.isEmpty) {
+    throw YahooException('Sembol bulunamadı: $symbol');
+  }
+
+  final result = results.first as Map<String, dynamic>;
+  final meta = result['meta'] as Map<String, dynamic>? ?? {};
+  final events = result['events'] as Map<String, dynamic>?;
+  final rawDividends = events?['dividends'] as Map<String, dynamic>?;
+
+  final dividends = <DividendEvent>[];
+  if (rawDividends != null) {
+    for (final entry in rawDividends.values) {
+      final e = entry as Map<String, dynamic>;
+      final amount = e['amount'] as num?;
+      final ts = e['date'] as int?;
+      if (amount == null || ts == null) continue;
+      dividends.add(DividendEvent(
+        DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true),
+        amount,
+      ));
+    }
+  }
+  dividends.sort((a, b) => b.date.compareTo(a.date));
+
+  final data = DividendData(meta['currency'] as String? ?? '', dividends);
+  _dividendCache[symbol] = _DividendCacheEntry(data, DateTime.now().add(_dividendCacheTtl));
+  return data;
+}

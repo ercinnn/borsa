@@ -98,6 +98,56 @@ Future<Response> _searchHandler(Request request) async {
               'type': q['quoteType'] ?? '',
             })
         .toList();
+
+    // Yahoo'nun arama endpoint'i isim/kelime bazlı fuzzy eşleşme yapıyor ve
+    // sonucu sabit quotesCount=10 ile kesiyor; bu yüzden örn. "GARAN" sorgusu
+    // GARAN.IS'i döndürmez (kelime kökü "Garan" birçok Avrupa fonunun adıyla
+    // -"Garantita", "Garantizado" vb.- çakışıp GARAN.IS'i top-10'un dışına
+    // itiyor), oysa tam "GARAN.IS" yazınca doğru sonucu veriyor. Bilinen
+    // BIST100/US100/crypto200 sembollerini burada prefiks eşleştirip Yahoo'nun
+    // sonucunda yoksa başa ekliyoruz, böylece küratörlü listedeki semboller
+    // Yahoo'nun sıralama tuhaflıklarından bağımsız her zaman aranabilir olur.
+    // Kripto listesi bulk-add'deki crypto200 preset'iyle aynı kaynağı
+    // (fetchTopCryptoSymbols, 1 saatlik cache) ve aynı statik yedeği
+    // (cryptoFallbackSymbols) paylaşıyor.
+    final existingSymbols =
+        results.map((r) => (r['symbol'] as String).toUpperCase()).toSet();
+    final upperQuery = q.trim().toUpperCase();
+    bool matchesQuery(String symbol) =>
+        symbol.split('.').first.startsWith(upperQuery) ||
+        symbol.startsWith(upperQuery);
+    final localMatches = <Map<String, dynamic>>[];
+    for (final sym in bist100Symbols) {
+      if (matchesQuery(sym) && existingSymbols.add(sym)) {
+        localMatches.add(
+            {'symbol': sym, 'name': sym, 'exchange': 'BIST', 'type': 'EQUITY'});
+      }
+    }
+    for (final sym in usPopular100Symbols) {
+      if (matchesQuery(sym) && existingSymbols.add(sym)) {
+        localMatches.add(
+            {'symbol': sym, 'name': sym, 'exchange': 'US', 'type': 'EQUITY'});
+      }
+    }
+    List<String> cryptoSymbols;
+    try {
+      cryptoSymbols = await fetchTopCryptoSymbols(_httpClient, 200,
+          apiKey: _coingeckoApiKey);
+    } catch (e) {
+      cryptoSymbols = cryptoFallbackSymbols;
+    }
+    for (final sym in cryptoSymbols) {
+      if (matchesQuery(sym) && existingSymbols.add(sym)) {
+        localMatches.add({
+          'symbol': sym,
+          'name': sym,
+          'exchange': 'Crypto',
+          'type': 'CRYPTOCURRENCY',
+        });
+      }
+    }
+    results.insertAll(0, localMatches);
+
     return _json({'results': results});
   } catch (e) {
     stderr.writeln('Arama hatası: $e');
@@ -315,6 +365,39 @@ Future<Response> _technicalHandler(Request request) async {
   } catch (e) {
     stderr.writeln('Teknik analiz hatası: $e');
     return _json({'error': 'Teknik analiz hesaplanırken bir hata oluştu.'},
+        status: 502);
+  }
+}
+
+/// Bir sembolün son 15 yıllık temettü geçmişini (tarih + hisse başı tutar)
+/// döner (bkz. lib/yahoo_client.dart fetchDividends). `/api/technical` gibi
+/// public — sembole özgü, kullanıcı verisi içermiyor. `totalPerShare`,
+/// portföydeki tahmini temettü geliri hesaplamasıyla aynı basit toplamı
+/// (bkz. portfolio_summary.dart) burada da tek seferlik gösterim için sağlar.
+Future<Response> _dividendsHandler(Request request) async {
+  final symbol = request.url.queryParameters['symbol'];
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
+  }
+
+  try {
+    final data = await fetchDividends(_httpClient, symbol);
+    final totalPerShare =
+        data.dividends.fold<num>(0, (sum, d) => sum + d.amount);
+    return _json({
+      'symbol': symbol.trim().toUpperCase(),
+      'currency': data.currency,
+      'dividends': [
+        for (final d in data.dividends)
+          {'date': d.date.toIso8601String(), 'amount': d.amount},
+      ],
+      'totalPerShare': totalPerShare,
+    });
+  } on YahooException catch (e) {
+    return _json({'error': e.message}, status: 404);
+  } catch (e) {
+    stderr.writeln('Temettü verisi alınırken hata: $e');
+    return _json({'error': 'Temettü verisi alınırken bir hata oluştu.'},
         status: 502);
   }
 }
@@ -573,6 +656,33 @@ Future<Response> _technicalWatchlistRemoveHandler(
   return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
+Future<Response> _dividendWatchlistGetHandler(
+    Request request, String userId, DividendWatchlistStore dividendWatchlist) async {
+  return _json({'symbols': await dividendWatchlist.symbolsFor(userId)});
+}
+
+Future<Response> _dividendWatchlistAddHandler(
+    Request request, String userId, DividendWatchlistStore dividendWatchlist) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final added = await dividendWatchlist.add(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'added': added});
+}
+
+Future<Response> _dividendWatchlistRemoveHandler(
+    Request request, String userId, DividendWatchlistStore dividendWatchlist) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final removed = await dividendWatchlist.remove(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
+}
+
 Future<Response> _portfolioGetHandler(
     Request request, String userId, PortfolioStore portfolio) async {
   final holdings = await portfolio.holdingsFor(userId);
@@ -660,6 +770,7 @@ void main(List<String> args) async {
   final notifications = NotificationStore(supabaseConfig, _httpClient);
   final favorites = FavoritesStore(supabaseConfig, _httpClient);
   final technicalWatchlist = TechnicalWatchlistStore(supabaseConfig, _httpClient);
+  final dividendWatchlist = DividendWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
   final technicalScoreCache =
       TechnicalScoreCache(_httpClient, watchlist, notifications);
@@ -741,6 +852,22 @@ void main(List<String> args) async {
       '/api/technical-watchlist/remove',
       _withAuth(supabaseConfig,
           (r, uid) => _technicalWatchlistRemoveHandler(r, uid, technicalWatchlist)),
+    )
+    ..get('/api/dividends', _dividendsHandler)
+    ..get(
+      '/api/dividend-watchlist',
+      _withAuth(supabaseConfig,
+          (r, uid) => _dividendWatchlistGetHandler(r, uid, dividendWatchlist)),
+    )
+    ..post(
+      '/api/dividend-watchlist/add',
+      _withAuth(supabaseConfig,
+          (r, uid) => _dividendWatchlistAddHandler(r, uid, dividendWatchlist)),
+    )
+    ..post(
+      '/api/dividend-watchlist/remove',
+      _withAuth(supabaseConfig,
+          (r, uid) => _dividendWatchlistRemoveHandler(r, uid, dividendWatchlist)),
     )
     ..get(
       '/api/technical-scores',

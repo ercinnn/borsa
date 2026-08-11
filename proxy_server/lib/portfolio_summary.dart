@@ -17,6 +17,18 @@ class PortfolioHoldingResult {
   /// [computePortfolioSummary] doc yorumu); diğer para birimleri toplama
   /// dahil edilmez.
   final double? valueInTry;
+  /// Son 15 yılda ödenen hisse başı temettülerin toplamı (bkz.
+  /// yahoo_client.dart fetchDividends) — temettü verisi alınamazsa veya hiç
+  /// temettü ödenmemişse null.
+  final double? totalDividendPerShare;
+  /// quantity × totalDividendPerShare, holding'in kendi para biriminde.
+  /// BASİTLEŞTİRİLMİŞ BİR TAHMİNDİR: pozisyonu ne zaman satın aldığın hesaba
+  /// katılmaz, sanki mevcut adedi son 15 yıl boyunca elinde tutmuşsun gibi
+  /// hesaplanır (bkz. [computePortfolioSummary] doc yorumu).
+  final double? estimatedDividendIncome;
+  /// estimatedDividendIncome'ın TRY karşılığı — valueInTry ile aynı kural
+  /// (yalnızca TRY/USD).
+  final double? estimatedDividendIncomeTry;
   final String? error;
 
   PortfolioHoldingResult({
@@ -30,6 +42,9 @@ class PortfolioHoldingResult {
     this.pnl,
     this.pnlPct,
     this.valueInTry,
+    this.totalDividendPerShare,
+    this.estimatedDividendIncome,
+    this.estimatedDividendIncomeTry,
     this.error,
   });
 
@@ -44,6 +59,9 @@ class PortfolioHoldingResult {
         'pnl': pnl,
         'pnlPct': pnlPct,
         'valueInTry': valueInTry,
+        'totalDividendPerShare': totalDividendPerShare,
+        'estimatedDividendIncome': estimatedDividendIncome,
+        'estimatedDividendIncomeTry': estimatedDividendIncomeTry,
         'error': error,
       };
 }
@@ -56,6 +74,10 @@ class PortfolioSummary {
   final double? totalPnlPct;
   final double? usdTryRate;
   final int unconvertedCount;
+  /// Tüm holding'lerin estimatedDividendIncomeTry toplamı (bkz.
+  /// [PortfolioHoldingResult.estimatedDividendIncome] doc yorumu — aynı
+  /// basitleştirme burada da geçerli).
+  final double totalDividendIncomeTry;
 
   PortfolioSummary({
     required this.holdings,
@@ -65,6 +87,7 @@ class PortfolioSummary {
     required this.totalPnlPct,
     required this.usdTryRate,
     required this.unconvertedCount,
+    required this.totalDividendIncomeTry,
   });
 
   Map<String, dynamic> toJson() => {
@@ -75,6 +98,7 @@ class PortfolioSummary {
         'totalPnlPct': totalPnlPct,
         'usdTryRate': usdTryRate,
         'unconvertedCount': unconvertedCount,
+        'totalDividendIncomeTry': totalDividendIncomeTry,
       };
 }
 
@@ -100,6 +124,7 @@ Future<PortfolioSummary> computePortfolioSummary(
       totalPnlPct: null,
       usdTryRate: null,
       unconvertedCount: 0,
+      totalDividendIncomeTry: 0,
     );
   }
 
@@ -137,6 +162,30 @@ Future<PortfolioSummary> computePortfolioSummary(
       final pnl = currentValue - costValue;
       final pnlPct = costValue == 0 ? null : (pnl / costValue) * 100;
       final valueInTry = _convertToTry(currentValue, data.currency, usdTryRate);
+
+      // Temettü verisi ayrı bir Yahoo isteği gerektirir (bkz. fetchDividends
+      // doc yorumu); alınamazsa pozisyon yine de fiyat/kâr-zarar bilgisiyle
+      // gösterilir, sadece temettü alanları null kalır.
+      double? totalDividendPerShare;
+      try {
+        final dividendData = await fetchDividends(client, h.symbol);
+        if (dividendData.dividends.isNotEmpty) {
+          totalDividendPerShare = dividendData.dividends
+              .fold<double>(0, (sum, d) => sum + d.amount.toDouble());
+        }
+      } catch (_) {
+        // Yukarıdaki yorumda açıklandığı gibi sessizce null bırakılır.
+      }
+      // BASİTLEŞTİRİLMİŞ BİR TAHMİN: pozisyonu ne zaman satın aldığın hesaba
+      // katılmaz, mevcut adedi son 15 yıl boyunca elinde tutmuşsun gibi
+      // hesaplanır (bkz. PortfolioHoldingResult.estimatedDividendIncome doc
+      // yorumu).
+      final estimatedDividendIncome =
+          totalDividendPerShare == null ? null : h.quantity * totalDividendPerShare;
+      final estimatedDividendIncomeTry = estimatedDividendIncome == null
+          ? null
+          : _convertToTry(estimatedDividendIncome, data.currency, usdTryRate);
+
       return PortfolioHoldingResult(
         symbol: h.symbol,
         quantity: h.quantity,
@@ -148,6 +197,9 @@ Future<PortfolioSummary> computePortfolioSummary(
         pnl: pnl,
         pnlPct: pnlPct,
         valueInTry: valueInTry,
+        totalDividendPerShare: totalDividendPerShare,
+        estimatedDividendIncome: estimatedDividendIncome,
+        estimatedDividendIncomeTry: estimatedDividendIncomeTry,
       );
     } on YahooException catch (e) {
       return PortfolioHoldingResult(
@@ -171,6 +223,7 @@ Future<PortfolioSummary> computePortfolioSummary(
   var totalValueTry = 0.0;
   var totalCostTry = 0.0;
   var unconvertedCount = 0;
+  var totalDividendIncomeTry = 0.0;
   for (final r in results) {
     final costValueTry = r.costValue == null
         ? null
@@ -180,6 +233,9 @@ Future<PortfolioSummary> computePortfolioSummary(
       totalCostTry += costValueTry;
     } else if (r.error == null) {
       unconvertedCount++;
+    }
+    if (r.estimatedDividendIncomeTry != null) {
+      totalDividendIncomeTry += r.estimatedDividendIncomeTry!;
     }
   }
   final totalPnlTry = totalValueTry - totalCostTry;
@@ -193,6 +249,7 @@ Future<PortfolioSummary> computePortfolioSummary(
     totalPnlPct: totalPnlPct,
     usdTryRate: usdTryRate,
     unconvertedCount: unconvertedCount,
+    totalDividendIncomeTry: totalDividendIncomeTry,
   );
 }
 

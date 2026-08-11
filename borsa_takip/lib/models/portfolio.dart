@@ -9,6 +9,15 @@ class PortfolioHoldingResult {
   final double? pnl;
   final double? pnlPct;
   final double? valueInTry;
+  /// Son 15 yılda ödenen hisse başı temettülerin toplamı, holding'in kendi
+  /// para biriminde (bkz. proxy_server/lib/yahoo_client.dart fetchDividends).
+  final double? totalDividendPerShare;
+  /// quantity × totalDividendPerShare. BASİTLEŞTİRİLMİŞ BİR TAHMİNDİR:
+  /// pozisyonu ne zaman satın aldığın hesaba katılmaz (bkz.
+  /// proxy_server/lib/portfolio_summary.dart doc yorumu).
+  final double? estimatedDividendIncome;
+  /// estimatedDividendIncome'ın TRY karşılığı — valueInTry ile aynı kural.
+  final double? estimatedDividendIncomeTry;
   final String? error;
 
   const PortfolioHoldingResult({
@@ -22,6 +31,9 @@ class PortfolioHoldingResult {
     this.pnl,
     this.pnlPct,
     this.valueInTry,
+    this.totalDividendPerShare,
+    this.estimatedDividendIncome,
+    this.estimatedDividendIncomeTry,
     this.error,
   });
 
@@ -36,6 +48,10 @@ class PortfolioHoldingResult {
         pnl: (json['pnl'] as num?)?.toDouble(),
         pnlPct: (json['pnlPct'] as num?)?.toDouble(),
         valueInTry: (json['valueInTry'] as num?)?.toDouble(),
+        totalDividendPerShare: (json['totalDividendPerShare'] as num?)?.toDouble(),
+        estimatedDividendIncome: (json['estimatedDividendIncome'] as num?)?.toDouble(),
+        estimatedDividendIncomeTry:
+            (json['estimatedDividendIncomeTry'] as num?)?.toDouble(),
         error: json['error'] as String?,
       );
 }
@@ -54,6 +70,8 @@ class PortfolioSummary {
   final double? totalPnlPct;
   final double? usdTryRate;
   final int unconvertedCount;
+  /// Tüm holding'lerin estimatedDividendIncomeTry toplamı.
+  final double totalDividendIncomeTry;
 
   const PortfolioSummary({
     required this.holdings,
@@ -63,6 +81,7 @@ class PortfolioSummary {
     required this.totalPnlPct,
     required this.usdTryRate,
     required this.unconvertedCount,
+    required this.totalDividendIncomeTry,
   });
 
   factory PortfolioSummary.fromJson(Map<String, dynamic> json) => PortfolioSummary(
@@ -76,5 +95,6 @@ class PortfolioSummary {
         totalPnlPct: (json['totalPnlPct'] as num?)?.toDouble(),
         usdTryRate: (json['usdTryRate'] as num?)?.toDouble(),
         unconvertedCount: json['unconvertedCount'] as int? ?? 0,
+        totalDividendIncomeTry: (json['totalDividendIncomeTry'] as num?)?.toDouble() ?? 0,
       );
 }
