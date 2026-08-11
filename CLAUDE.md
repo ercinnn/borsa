@@ -126,12 +126,19 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `FavoritesStore` again (own `technical_watchlist` table, no seeding, no
   notification side-effects) — it's just which symbols the Teknik tab
   currently analyzes; unrelated to `WatchlistStore`/`FavoritesStore`.
+  `PortfolioStore` backs the Portföy tab: one row per `(user_id, symbol)`
+  (unique index, upserted via `resolution=merge-duplicates` — same pattern
+  as `TrackedSymbolStore.setFor`), storing only `quantity`/`cost_basis`.
+  Re-adding a symbol already held **overwrites** it rather than merging a
+  weighted-average cost — a deliberate simplification (see
+  `portfolio_summary.dart` below and `PortfolioScreen`'s doc comment).
   Table schema: `proxy_server/supabase_schema.sql` +
   `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` +
-  `supabase_schema_technical.sql` (run once each, in order, in the Supabase
-  SQL Editor — the second adds `user_id` and RLS to the base tables, the
-  third adds the `favorites` and `tracked_symbol` tables, the fourth adds
-  `technical_watchlist`). Requires `SUPABASE_URL` and
+  `supabase_schema_technical.sql` + `supabase_schema_portfolio.sql` (run
+  once each, in order, in the Supabase SQL Editor — the second adds
+  `user_id` and RLS to the base tables, the third adds the `favorites` and
+  `tracked_symbol` tables, the fourth adds `technical_watchlist`, the fifth
+  adds `portfolio_holdings`). Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -218,6 +225,22 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   trading days for MA200 even with weekend/holiday gaps) and is public like
   `/api/candles` (no per-user data); only the *list* of symbols to analyze
   (`/api/technical-watchlist*`) is per-user and auth-gated.
+- `portfolio_summary.dart` — `computePortfolioSummary()` powers the Portföy
+  tab: for each holding, fetches the current price via `fetchChart` (same
+  shared cache as everywhere else) and computes P&L *in the holding's own
+  currency* (no cross-currency math there). Separately, it fetches Yahoo's
+  `TRY=X` symbol (USD/TRY rate — same `fetchChart`, no new external
+  dependency) once per request and uses it to convert USD-denominated
+  holdings into TRY so the whole portfolio can be summed into one
+  `totalValueTry`/`totalPnlTry`. Only `TRY` and `USD` are handled (the only
+  two currencies this app's presets/symbols actually return) — anything
+  else is shown per-holding but excluded from the TRY totals
+  (`valueInTry: null`, counted in `unconvertedCount`). Unlike
+  `TechnicalScoreCache`, this is computed fresh on every `/api/portfolio`
+  request rather than cached in the background — portfolios are small
+  (a handful of holdings), so a live `Future.wait` over them is fast
+  enough, and freshness matters more here than for the 400-symbol
+  watchlist scan.
 
 `GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
 as a target for Render's health check; `/api/*` routes are the wrong choice
@@ -247,13 +270,16 @@ shape as `watchlist`), `tracked` (GET returns `{symbol}` or `{symbol:
 null}`, POST upserts it — backs the Takip tab), `technical` (GET, params:
 `symbol` — public, returns a `TechnicalAnalysisResult`, see
 `technical_analysis.dart` above), `technical-watchlist` (GET/add/remove,
-same shape as `favorites` — which symbols the Teknik tab shows),
-`notifications` (paginated, 100/page, newest first),
+same shape as `favorites` — which symbols the Teknik tab shows), `portfolio`
+(GET returns a full `PortfolioSummary` — live prices + TRY totals computed
+fresh each call, see `portfolio_summary.dart` above; `add`/`remove` take
+`{symbol, quantity, costBasis}`/`{symbol}`, `add` is an upsert-overwrite
+not a merge), `notifications` (paginated, 100/page, newest first),
 `notifications/check-now` (fire-and-forget — does NOT await the full scan,
 since a large watchlist can take minutes; guarded by a module-level
 `_checkInProgress` flag against overlapping runs). All
-`watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`notifications*`
-endpoints require `Authorization: Bearer <token>` (see Auth above);
+`watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`portfolio*`/
+`notifications*` endpoints require `Authorization: Bearer <token>` (see Auth above);
 `search`/`candles`/`technical`/`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
@@ -265,7 +291,7 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of six tab screens behind a bottom `NavigationBar`:
+`IndexedStack` of seven tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
 notification feed — its watchlist-management area itself has two sub-tabs,
 "İzleme Listesi" (the existing add/remove/preset UI) and "Puan Sıralaması"
@@ -289,7 +315,13 @@ comparison_chart.dart`'s doc comment explains the alignment tradeoff: since
 symbols can trade on different calendars — BIST closed weekends, crypto
 7/24 — series are truncated to the shortest one's length, aligned so
 *today* lines up for all of them, rather than attempting real calendar-date
-alignment from the pre-formatted `period` strings).
+alignment from the pre-formatted `period` strings), and `PortfolioScreen`
+(add/edit/remove positions by symbol+quantity+cost, live P&L, a
+`CustomPainter` donut allocation chart — `widgets/
+portfolio_allocation_chart.dart`, no charting package, same approach as
+`CandlestickChart` — and a single TRY-denominated total; see
+`portfolio_summary.dart` in the backend section for the USD→TRY conversion
+this depends on).
 Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an

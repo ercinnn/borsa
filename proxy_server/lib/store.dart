@@ -153,6 +153,64 @@ class TechnicalWatchlistStore {
   }
 }
 
+class PortfolioHoldingRow {
+  final String symbol;
+  final double quantity;
+  final double costBasis;
+  PortfolioHoldingRow(this.symbol, this.quantity, this.costBasis);
+}
+
+/// Portföy sekmesindeki pozisyonlar: kullanıcı başına sembol başına tek
+/// satır. Aynı sembolü tekrar eklemek mevcut adet/maliyeti YENİ değerlerle
+/// tamamen değiştirir (ağırlıklı ortalama birleştirme yapılmaz — "basit"
+/// portföy takibi kapsamında bilinçli bir sadeleştirme; kullanıcı toplam
+/// adedi/ortalama maliyeti kendisi hesaplayıp tekrar girer).
+class PortfolioStore {
+  final SupabaseTable _table;
+
+  PortfolioStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'portfolio_holdings');
+
+  Future<List<PortfolioHoldingRow>> holdingsFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'symbol,quantity,cost_basis',
+      filters: {'user_id': 'eq.$userId', 'order': 'symbol.asc'},
+    );
+    return rows
+        .map((r) => PortfolioHoldingRow(
+              r['symbol'] as String,
+              (r['quantity'] as num).toDouble(),
+              (r['cost_basis'] as num).toDouble(),
+            ))
+        .toList();
+  }
+
+  Future<void> upsert(String userId, String symbol, double quantity, double costBasis) async {
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty || quantity <= 0) return;
+    await _table.insert(
+      {
+        'user_id': userId,
+        'symbol': normalized,
+        'quantity': quantity,
+        'cost_basis': costBasis,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      onConflict: 'user_id,symbol',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    );
+  }
+
+  Future<bool> remove(String userId, String symbol) async {
+    final normalized = symbol.trim().toUpperCase();
+    final deleted = await _table.delete({
+      'user_id': 'eq.$userId',
+      'symbol': 'eq.$normalized',
+    });
+    return deleted.isNotEmpty;
+  }
+}
+
 /// Takip sekmesinde gösterilen, kullanıcı başına tek aktif sembol.
 class TrackedSymbolStore {
   final SupabaseTable _table;

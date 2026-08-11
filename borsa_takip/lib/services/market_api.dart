@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/candle.dart';
 import '../models/interval.dart';
 import '../models/notification_item.dart';
+import '../models/portfolio.dart';
 import '../models/scored_symbol.dart';
 import '../models/symbol.dart';
 import '../models/technical_analysis.dart';
@@ -198,6 +199,31 @@ class MarketApi {
   Future<bool> refreshTechnicalScores() async {
     final resp = await _post(Uri.parse('$_baseUrl/api/technical-scores/refresh'), {});
     return resp['started'] as bool? ?? false;
+  }
+
+  /// Portföy sekmesi: pozisyonlar + canlı fiyat/TL karşılığıyla hesaplanmış
+  /// özet (bkz. models/portfolio.dart, proxy_server/lib/portfolio_summary.dart).
+  Future<PortfolioSummary> getPortfolio() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/portfolio'));
+    return PortfolioSummary.fromJson(resp);
+  }
+
+  /// Aynı sembol zaten portföydeyse mevcut adet/maliyeti YENİ değerlerle
+  /// tamamen değiştirir (bkz. proxy_server/lib/store.dart PortfolioStore).
+  Future<void> addPortfolioHolding({
+    required String symbol,
+    required double quantity,
+    required double costBasis,
+  }) async {
+    await _post(Uri.parse('$_baseUrl/api/portfolio/add'), {
+      'symbol': symbol,
+      'quantity': quantity,
+      'costBasis': costBasis,
+    });
+  }
+
+  Future<void> removePortfolioHolding(String symbol) async {
+    await _post(Uri.parse('$_baseUrl/api/portfolio/remove'), {'symbol': symbol});
   }
 
   /// Takip sekmesinde gösterilen, kullanıcı başına kalıcı olarak saklanan

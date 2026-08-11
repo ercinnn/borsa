@@ -8,6 +8,7 @@ import 'screens/favorites_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
+import 'screens/portfolio_screen.dart';
 import 'screens/technical_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'services/market_api.dart';
@@ -257,6 +258,7 @@ class _RootShellState extends State<RootShell> {
     'Takip',
     'Teknik',
     'Karşılaştır',
+    'Portföy',
   ];
 
   @override
@@ -382,6 +384,10 @@ class _RootShellState extends State<RootShell> {
             const ComparisonScreen()
           else
             const SizedBox.shrink(),
+          if (_visitedTabs.contains(6))
+            const PortfolioScreen()
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -395,6 +401,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.insights), label: 'Takip'),
           NavigationDestination(icon: Icon(Icons.query_stats), label: 'Teknik'),
           NavigationDestination(icon: Icon(Icons.compare_arrows), label: 'Karşılaştır'),
+          NavigationDestination(icon: Icon(Icons.pie_chart), label: 'Portföy'),
         ],
       ),
     );

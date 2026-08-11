@@ -11,6 +11,7 @@ import '../lib/coingecko_client.dart';
 import '../lib/env.dart';
 import '../lib/monthly_low_checker.dart';
 import '../lib/preset_lists.dart';
+import '../lib/portfolio_summary.dart';
 import '../lib/store.dart';
 import '../lib/supabase_client.dart';
 import '../lib/technical_analysis.dart';
@@ -572,6 +573,43 @@ Future<Response> _technicalWatchlistRemoveHandler(
   return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
+Future<Response> _portfolioGetHandler(
+    Request request, String userId, PortfolioStore portfolio) async {
+  final holdings = await portfolio.holdingsFor(userId);
+  final summary = await computePortfolioSummary(_httpClient, holdings);
+  return _json(summary.toJson());
+}
+
+Future<Response> _portfolioAddHandler(
+    Request request, String userId, PortfolioStore portfolio) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  final quantity = (body['quantity'] as num?)?.toDouble();
+  final costBasis = (body['costBasis'] as num?)?.toDouble();
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  if (quantity == null || quantity <= 0) {
+    return _json({'error': 'quantity 0\'dan büyük olmalı'}, status: 400);
+  }
+  if (costBasis == null || costBasis < 0) {
+    return _json({'error': 'costBasis gerekli'}, status: 400);
+  }
+  await portfolio.upsert(userId, symbol, quantity, costBasis);
+  return _json({'symbol': symbol.trim().toUpperCase()});
+}
+
+Future<Response> _portfolioRemoveHandler(
+    Request request, String userId, PortfolioStore portfolio) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final removed = await portfolio.remove(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
+}
+
 Future<Response> _trackedGetHandler(
     Request request, String userId, TrackedSymbolStore tracked) async {
   return _json({'symbol': await tracked.getFor(userId)});
@@ -625,6 +663,7 @@ void main(List<String> args) async {
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
   final technicalScoreCache =
       TechnicalScoreCache(_httpClient, watchlist, notifications);
+  final portfolio = PortfolioStore(supabaseConfig, _httpClient);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
 
@@ -712,6 +751,18 @@ void main(List<String> args) async {
       '/api/technical-scores/refresh',
       _withAuth(supabaseConfig,
           (r, uid) => _technicalScoresRefreshHandler(r, uid, technicalScoreCache)),
+    )
+    ..get(
+      '/api/portfolio',
+      _withAuth(supabaseConfig, (r, uid) => _portfolioGetHandler(r, uid, portfolio)),
+    )
+    ..post(
+      '/api/portfolio/add',
+      _withAuth(supabaseConfig, (r, uid) => _portfolioAddHandler(r, uid, portfolio)),
+    )
+    ..post(
+      '/api/portfolio/remove',
+      _withAuth(supabaseConfig, (r, uid) => _portfolioRemoveHandler(r, uid, portfolio)),
     )
     ..get(
       '/api/tracked',
