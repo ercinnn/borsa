@@ -215,7 +215,20 @@ final _overviewCache = <String, _OverviewCacheEntry>{};
 final _historyCache = <String, _HistoryCacheEntry>{};
 const _fundamentalsCacheTtl = Duration(hours: 24);
 
-double? _asDouble(dynamic v) => v == null ? null : (v as num).toDouble();
+// Yahoo, JSON'da temsil edilemeyen sonsuz/tanımsız oranları (ör. EPS'i
+// sıfıra çok yakın illikit bir hisse için "sonsuz" F/K) sayı yerine
+// "Infinity"/"-Infinity"/"NaN" string'i olarak döndürüyor (ISBTR.IS'te
+// canlıda gözlemlendi: trailingPE.raw == "Infinity", düz `as num` cast'i
+// çöktürüyordu). Böyle bir değeri sayıya çevirip sonra "sonlu değil" diye
+// null'a düşürüyoruz — DCF/Piotroski/Altman hesaplarına Infinity sızıp
+// sessizce bozuk sonuç üretmesindense "bu alan yok" davranışı daha güvenli.
+double? _asDouble(dynamic v) {
+  if (v == null) return null;
+  final num? n = v is num ? v : (v is String ? double.tryParse(v) : null);
+  if (n == null) return null;
+  final d = n.toDouble();
+  return d.isFinite ? d : null;
+}
 
 /// `quoteSummary` (`assetProfile,price,summaryDetail,financialData,
 /// defaultKeyStatistics` modülleri) üzerinden tek-dönemlik şirket özeti.
