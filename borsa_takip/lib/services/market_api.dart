@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/backtest.dart';
 import '../models/candle.dart';
 import '../models/dividend.dart';
 import '../models/interval.dart';
@@ -237,6 +238,30 @@ class MarketApi {
       symbol: resp['symbol'] as String,
       removed: resp['removed'] as bool? ?? false,
     );
+  }
+
+  /// "Bu puan eşiğine göre alım-satım yapsaydım geçmişte nasıl performans
+  /// verirdi" simülasyonu (bkz. models/backtest.dart,
+  /// proxy_server/lib/backtest.dart runBacktest). `/api/technical` gibi
+  /// auth gerektirmez.
+  Future<BacktestResult> runBacktest({
+    required String symbol,
+    required DateTime start,
+    required DateTime end,
+    required int buyThreshold,
+    required int sellThreshold,
+    required double initialCapital,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/backtest').replace(queryParameters: {
+      'symbol': symbol,
+      'start': _formatDate(start),
+      'end': _formatDate(end),
+      'buyThreshold': '$buyThreshold',
+      'sellThreshold': '$sellThreshold',
+      'initialCapital': '$initialCapital',
+    });
+    final resp = await _get(uri);
+    return BacktestResult.fromJson(resp);
   }
 
   /// Portföy sekmesi: pozisyonlar + canlı fiyat/TL karşılığıyla hesaplanmış

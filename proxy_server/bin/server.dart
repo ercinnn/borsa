@@ -7,6 +7,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
+import '../lib/backtest.dart';
 import '../lib/coingecko_client.dart';
 import '../lib/env.dart';
 import '../lib/monthly_low_checker.dart';
@@ -398,6 +399,70 @@ Future<Response> _dividendsHandler(Request request) async {
   } catch (e) {
     stderr.writeln('Temettü verisi alınırken hata: $e');
     return _json({'error': 'Temettü verisi alınırken bir hata oluştu.'},
+        status: 502);
+  }
+}
+
+// _technicalHandler'ın canlı puanla aynı büyüklükte bir lookback kullanması
+// gibi, backtest de simülasyon başlangıcından önce en az bu kadar takvim
+// günü geriye giderek ısınma verisi çeker (bkz. lib/backtest.dart
+// _lookbackCandles doc yorumu — 260 iş günü ~370-400 takvim günü eder,
+// hafta sonu/tatil boşluklarıyla güvenli pay bırakmak için 400 kullanılıyor).
+const _backtestLookbackDays = 400;
+
+/// "Bu puan eşiğine göre alım-satım yapsaydım geçmişte nasıl performans
+/// verirdi" simülasyonu (bkz. lib/backtest.dart runBacktest). `/api/technical`
+/// gibi public — sembole özgü, kullanıcı verisi içermiyor. Params: `symbol`,
+/// `start`/`end` (ISO tarih, simülasyonun kendisi bu aralıkta çalışır — önceki
+/// veri yalnızca ısınma için çekilir), `buyThreshold`/`sellThreshold`
+/// (varsayılan 60/40 — Teknik sekmesindeki Al/Sat kademe sınırlarıyla aynı),
+/// `initialCapital` (varsayılan 10000).
+Future<Response> _backtestHandler(Request request) async {
+  final params = request.url.queryParameters;
+  final symbol = params['symbol'];
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
+  }
+  final start = DateTime.tryParse(params['start'] ?? '');
+  final end = DateTime.tryParse(params['end'] ?? '');
+  if (start == null || end == null || !end.isAfter(start)) {
+    return _json({'error': 'geçerli start/end tarihleri gerekli'}, status: 400);
+  }
+  final buyThreshold = int.tryParse(params['buyThreshold'] ?? '') ?? 60;
+  final sellThreshold = int.tryParse(params['sellThreshold'] ?? '') ?? 40;
+  if (buyThreshold <= sellThreshold) {
+    return _json({'error': 'buyThreshold, sellThreshold\'dan büyük olmalı'},
+        status: 400);
+  }
+  final initialCapital = double.tryParse(params['initialCapital'] ?? '') ?? 10000;
+  if (initialCapital <= 0) {
+    return _json({'error': 'initialCapital 0\'dan büyük olmalı'}, status: 400);
+  }
+
+  final fetchStart = start.subtract(const Duration(days: _backtestLookbackDays));
+  final period1 = fetchStart.millisecondsSinceEpoch ~/ 1000;
+  final period2 =
+      end.add(const Duration(days: 1)).millisecondsSinceEpoch ~/ 1000;
+
+  try {
+    final data = await fetchChart(_httpClient, symbol, period1, period2, '1d');
+    final result = runBacktest(
+      symbol: symbol.trim().toUpperCase(),
+      currency: data.currency,
+      candles: data.candles,
+      simulationStart: start,
+      buyThreshold: buyThreshold,
+      sellThreshold: sellThreshold,
+      initialCapital: initialCapital,
+    );
+    return _json(result.toJson());
+  } on YahooException catch (e) {
+    return _json({'error': e.message}, status: 404);
+  } on InsufficientDataException catch (e) {
+    return _json({'error': e.message}, status: 422);
+  } catch (e) {
+    stderr.writeln('Backtest hatası: $e');
+    return _json({'error': 'Backtest hesaplanırken bir hata oluştu.'},
         status: 502);
   }
 }
@@ -854,6 +919,7 @@ void main(List<String> args) async {
           (r, uid) => _technicalWatchlistRemoveHandler(r, uid, technicalWatchlist)),
     )
     ..get('/api/dividends', _dividendsHandler)
+    ..get('/api/backtest', _backtestHandler)
     ..get(
       '/api/dividend-watchlist',
       _withAuth(supabaseConfig,

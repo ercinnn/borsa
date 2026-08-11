@@ -267,6 +267,28 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `PortfolioStore`'s overwrite-not-merge choice above. Converted to TRY with
   the same `_convertToTry` helper and summed into
   `PortfolioSummary.totalDividendIncomeTry`.
+- `backtest.dart` — `runBacktest()` powers the Backtest tab: "if I'd bought
+  when the Teknik score crossed a buy threshold and sold when it crossed a
+  sell threshold, how would that have performed historically." For each
+  simulated day it re-runs `computeTechnicalAnalysis()` over a **fixed**
+  trailing window (`_lookbackCandles = 260`, matching the order of magnitude
+  of `_technicalHandler`'s own ~500-calendar-day live lookback) ending on
+  that day — fixed rather than growing-from-genesis so each simulated day
+  costs O(window) instead of O(elapsed days), keeping a multi-year backtest
+  well under a second of pure in-process computation with no extra Yahoo
+  calls (the one call from `_backtestHandler` below already fetched
+  everything needed). Position sizing is deliberately all-or-nothing (100%
+  cash ↔ 100% shares, no partial positions, no commission/slippage modeled)
+  — same "keep it simple" simplification style as `PortfolioStore`'s
+  overwrite-not-merge and the dividend-income estimate above; the result
+  also includes a buy-and-hold return over the same window as a benchmark,
+  since "did it even beat doing nothing" is the first thing this kind of
+  simulation needs to answer. `_backtestHandler` in `bin/server.dart` fetches
+  candles starting 400 calendar days *before* the user's chosen start date
+  (warm-up for the trailing-window scores, same reasoning as
+  `_technicalHandler`'s 500-day fetch) through the chosen end date, then
+  hands the whole set to `runBacktest`, which only starts trading once it
+  reaches the user's actual start date.
 
 `GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
 as a target for Render's health check; `/api/*` routes are the wrong choice
@@ -304,14 +326,19 @@ not a merge), `dividends` (GET, params: `symbol` — public, returns
 `{symbol, currency, dividends: [{date, amount}], totalPerShare}`, see
 `fetchDividends()` above), `dividend-watchlist` (GET/add/remove, same shape
 as `favorites`/`technical-watchlist` — which symbols the Temettü tab
-shows), `notifications` (paginated, 100/page, newest first),
+shows), `backtest` (GET, params: `symbol`, `start`/`end` (ISO dates —
+trading only happens inside this range, data before it is fetched purely
+as lookback/warm-up), `buyThreshold`/`sellThreshold` (default 60/40, must
+satisfy `buyThreshold > sellThreshold`), `initialCapital` (default 10000)
+— public, returns a `BacktestResult`, see `backtest.dart` above),
+`notifications` (paginated, 100/page, newest first),
 `notifications/check-now` (fire-and-forget — does NOT await the full scan,
 since a large watchlist can take minutes; guarded by a module-level
 `_checkInProgress` flag against overlapping runs). All
 `watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`portfolio*`/
 `dividend-watchlist*`/`notifications*` endpoints require `Authorization:
 Bearer <token>` (see Auth above); `search`/`candles`/`technical`/
-`dividends`/`health` don't.
+`dividends`/`backtest`/`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
 `Timer.periodic(Duration(hours: 24))` — this only fires while the process
@@ -322,7 +349,7 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of eight tab screens behind a bottom `NavigationBar`:
+`IndexedStack` of nine tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
 notification feed — its watchlist-management area itself has two sub-tabs,
 "İzleme Listesi" (the existing add/remove/preset UI) and "Puan Sıralaması"
@@ -355,11 +382,20 @@ a portfolio-wide total in the summary card) an estimated dividend income
 figure with an inline caveat that it assumes the current quantity was held
 for the full 15-year window; see `portfolio_summary.dart` in the backend
 section for both the USD→TRY conversion and the dividend-income caveat in
-full), and `DividendScreen` (Temettü tab: own `DividendWatchlistStore`-backed
+full), `DividendScreen` (Temettü tab: own `DividendWatchlistStore`-backed
 symbol list, independent of every other tab's selection — same
 watchlist-chip pattern as `TechnicalScreen`; selecting a symbol shows its
 raw `/api/dividends` history as a date+amount table, no quantity/income math
-here, that's `PortfolioScreen`'s job).
+here, that's `PortfolioScreen`'s job), and `BacktestScreen` (Backtest tab:
+symbol search + a `showDateRangePicker` range + buy/sell score threshold and
+starting-capital inputs, all transient — unlike every other tab there's no
+persisted "which symbols" list here, each run is its own one-off experiment;
+running it shows the strategy's return next to a buy-and-hold benchmark for
+the same window, `widgets/backtest_chart.dart` (a two-series adaptation of
+`comparison_chart.dart`'s `CustomPainter` line-chart approach — strategy in
+cyan, buy-and-hold in muted slate as the "reference" line) plotting both as
+% return over time, and a trade-by-trade table; see `backtest.dart` in the
+backend section for the simulation itself and its simplifying assumptions).
 Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an
@@ -474,24 +510,6 @@ adding a new interval rather than iterating `ChartInterval.values`.
   each other live) — a second device/tab, or the same app after a full
   reload, only sees the latest state from its own next `/api/favorites`
   fetch, not proactively.
-
-## Planned / not yet implemented
-
-Discussed and deliberately deferred (this is meaningfully bigger than the
-features shipped alongside Portföy/Temettü — Puan Değişim Bildirimi,
-Karşılaştırmalı Grafik, RSI/MACD Paneli, Temettü Takibi — each of which took
-its own session-slice; this is next up):
-
-- **Backtesting** ("bu puan eşiğine göre alım-satım yapsaydım geçmişte nasıl
-  performans verirdi" simulation). Blocker: `TechnicalScoreCache` only ever
-  holds each symbol's *current* score — there's no historical score series
-  to simulate against. `computeTechnicalAnalysis()` can already compute a
-  score for an arbitrary trailing candle window, so a backtest would mean
-  repeatedly calling it with a rolling/truncated `candles` list (one call
-  per simulated day) rather than needing new indicator math — but that's a
-  lot of repeated computation per backtest run, and needs its own
-  rate-limit-aware batching story (unlike `TechnicalScoreCache`, which only
-  ever needs *one* fresh value per symbol).
 
 ## UI/UX Tasarım Kuralları
 

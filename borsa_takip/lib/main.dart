@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/symbol.dart';
+import 'screens/backtest_screen.dart';
 import 'screens/comparison_screen.dart';
 import 'screens/dividend_screen.dart';
 import 'screens/favorites_screen.dart';
@@ -261,6 +262,7 @@ class _RootShellState extends State<RootShell> {
     'Karşılaştır',
     'Portföy',
     'Temettü',
+    'Backtest',
   ];
 
   @override
@@ -394,6 +396,10 @@ class _RootShellState extends State<RootShell> {
             const DividendScreen()
           else
             const SizedBox.shrink(),
+          if (_visitedTabs.contains(8))
+            const BacktestScreen()
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -409,6 +415,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(icon: Icon(Icons.compare_arrows), label: 'Karşılaştır'),
           NavigationDestination(icon: Icon(Icons.pie_chart), label: 'Portföy'),
           NavigationDestination(icon: Icon(Icons.payments), label: 'Temettü'),
+          NavigationDestination(icon: Icon(Icons.history_toggle_off), label: 'Backtest'),
         ],
       ),
     );
