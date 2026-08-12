@@ -209,7 +209,17 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   authenticated via `COINGECKO_API_KEY` (`x-cg-demo-api-key` header, opt-in
   — see Deployment); if all retries fail and there's no cached result, the
   `crypto300` handler falls back to the static `cryptoFallbackSymbols` list
-  rather than erroring.
+  rather than erroring. CoinGecko's `/coins/markets` `per_page` silently
+  caps at 250 — requesting more doesn't error, it just falls back to
+  CoinGecko's own default of 100 (discovered live: `crypto300` was
+  returning only 100 symbols, all already in the watchlist, so "Kripto İlk
+  300 Ekle" reported 0 added). `fetchTopCryptoSymbols()` paginates in fixed
+  250-item pages when `count` exceeds that ceiling, always requesting the
+  *same* `per_page` across pages and slicing the last page down to what's
+  still needed — CoinGecko's `page` offset is relative to that request's
+  own `per_page`, so mixing page sizes across requests (e.g. page 2 with
+  `per_page=50` after a page 1 of `per_page=250`) would silently fetch the
+  wrong rank range (51-100 instead of 251-300) rather than erroring.
 - `technical_score_cache.dart` — `TechnicalScoreCache` powers the
   Bildirimler tab's "Puan Sıralaması" sub-tab: same batching pattern as
   `MonthlyLowChecker` (distinct symbols across all users' watchlists, 4 at a
