@@ -365,6 +365,22 @@ class MarketApi {
     await _post(Uri.parse('$_baseUrl/api/tracked'), {'symbol': symbol});
   }
 
+  /// Ayarlar sekmesinde kullanıcının kapattığı alt gezinme sekmelerinin
+  /// anahtar listesi (ör. `['chart', 'backtest']`). Hiç ayarlanmadıysa boş
+  /// liste döner (tüm sekmeler açık).
+  Future<List<String>> getHiddenTabs() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/tab-preferences'));
+    final raw = resp['hiddenTabs'] as List?;
+    return raw?.cast<String>() ?? [];
+  }
+
+  Future<void> setHiddenTabs(List<String> hiddenTabs) async {
+    await _post(
+      Uri.parse('$_baseUrl/api/tab-preferences'),
+      {'hiddenTabs': hiddenTabs},
+    );
+  }
+
   /// [category]: 'bist', 'us' veya 'crypto'; verilmezse tüm bildirimler.
   Future<NotificationPage> getNotifications({int page = 1, String? category}) async {
     final uri = Uri.parse('$_baseUrl/api/notifications').replace(

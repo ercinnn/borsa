@@ -985,6 +985,23 @@ Future<Response> _trackedSetHandler(
   return _json({'symbol': symbol.trim().toUpperCase()});
 }
 
+Future<Response> _tabPreferencesGetHandler(
+    Request request, String userId, TabPreferencesStore tabPreferences) async {
+  return _json({'hiddenTabs': await tabPreferences.hiddenTabsFor(userId)});
+}
+
+Future<Response> _tabPreferencesSetHandler(
+    Request request, String userId, TabPreferencesStore tabPreferences) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final hiddenTabs = body['hiddenTabs'];
+  if (hiddenTabs is! List) {
+    return _json({'error': 'hiddenTabs gerekli'}, status: 400);
+  }
+  final normalized = hiddenTabs.whereType<String>().toList();
+  await tabPreferences.setFor(userId, normalized);
+  return _json({'hiddenTabs': normalized});
+}
+
 Future<Response> _notificationsGetHandler(
     Request request, String userId, NotificationStore notifications) async {
   final page = int.tryParse(request.url.queryParameters['page'] ?? '') ?? 1;
@@ -1022,6 +1039,7 @@ void main(List<String> args) async {
   final dividendWatchlist = DividendWatchlistStore(supabaseConfig, _httpClient);
   final fundamentalsWatchlist = FundamentalsWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
+  final tabPreferences = TabPreferencesStore(supabaseConfig, _httpClient);
   final technicalScoreCache =
       TechnicalScoreCache(_httpClient, watchlist, notifications);
   final portfolio = PortfolioStore(supabaseConfig, _httpClient);
@@ -1203,6 +1221,16 @@ void main(List<String> args) async {
     ..post(
       '/api/tracked',
       _withAuth(supabaseConfig, (r, uid) => _trackedSetHandler(r, uid, trackedSymbol)),
+    )
+    ..get(
+      '/api/tab-preferences',
+      _withAuth(supabaseConfig,
+          (r, uid) => _tabPreferencesGetHandler(r, uid, tabPreferences)),
+    )
+    ..post(
+      '/api/tab-preferences',
+      _withAuth(supabaseConfig,
+          (r, uid) => _tabPreferencesSetHandler(r, uid, tabPreferences)),
     )
     ..get(
       '/api/notifications',

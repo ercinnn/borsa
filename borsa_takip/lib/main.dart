@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'models/root_tabs.dart';
 import 'models/symbol.dart';
 import 'screens/backtest_screen.dart';
 import 'screens/comparison_screen.dart';
@@ -12,11 +13,13 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/portfolio_screen.dart';
+import 'screens/settings_screen.dart';
 import 'screens/technical_screen.dart';
 import 'screens/tracking_screen.dart';
 import 'services/market_api.dart';
 import 'services/supabase_config.dart';
 import 'theme/app_colors.dart';
+import 'widgets/scrollable_bottom_nav.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -159,26 +162,6 @@ ThemeData _buildTheme() {
       style: TextButton.styleFrom(foregroundColor: AppColors.cyan500),
     ),
     iconTheme: const IconThemeData(color: AppColors.slate400),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: AppColors.slate900.withValues(alpha: 0.9),
-      indicatorColor: AppColors.cyan500.withValues(alpha: 0.2),
-      labelTextStyle: WidgetStateProperty.resolveWith(
-        (states) => TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-          color: states.contains(WidgetState.selected)
-              ? AppColors.slate100
-              : AppColors.slate400,
-        ),
-      ),
-      iconTheme: WidgetStateProperty.resolveWith(
-        (states) => IconThemeData(
-          color: states.contains(WidgetState.selected)
-              ? AppColors.cyan500
-              : AppColors.slate400,
-        ),
-      ),
-    ),
   );
 }
 
@@ -220,7 +203,15 @@ class RootShell extends StatefulWidget {
 
 class _RootShellState extends State<RootShell> {
   final _api = MarketApi();
-  int _index = 0;
+
+  // Sekmeler artık pozisyonel int yerine sabit bir anahtarla (bkz.
+  // models/root_tabs.dart) izleniyor: Ayarlar'dan sekme aç/kapa yapılınca
+  // görünür sekme listesi değişse de (dolayısıyla bir int index'in neye
+  // karşılık geldiği kayabilir), bir anahtar her zaman aynı sekmeyi işaret
+  // eder. `_tabOrder`, IndexedStack'in sabit çocuk sırası (Ayarlar dahil);
+  // alt gezinme çubuğu bunun gizli olmayan bir alt kümesini gösterir.
+  static const _tabOrder = [...toggleableRootTabs, settingsRootTab];
+  String _selectedKey = toggleableRootTabs.first.key;
 
   // Bildirim listesinden bir sembole tıklanınca Grafik sekmesine, Favoriler
   // listesinden takip ikonuna basılınca Takip sekmesine bu sembolle geçmek
@@ -239,38 +230,44 @@ class _RootShellState extends State<RootShell> {
   // yüklemesi aralarında senkron kalmazdı.
   List<String> _favorites = [];
 
+  // Ayarlar sekmesinde kapatılmış sekmelerin anahtarları (Supabase'de
+  // tab_preferences tablosunda kullanıcı başına saklanır, bkz. MarketApi
+  // .getHiddenTabs/setHiddenTabs). Boş = tüm sekmeler açık. Ayarlar
+  // sekmesinin kendisi hiç bu kümeye giremez (SettingsScreen'e sadece
+  // toggleableRootTabs veriliyor).
+  Set<String> _hiddenTabs = {};
+
   // IndexedStack tüm sekmeleri en baştan canlı tutuyor (favori senkronu bunu
   // gerektiriyor, bkz. yukarısı), ama bu açılışta ziyaret edilmemiş
   // sekmelerin bile initState'teki network çağrılarını hemen ateşlemesine
   // yol açıyordu. Bunun yerine bir sekme sadece ilk ziyaret edildiğinde
   // gerçek widget'ı ile değiştiriliyor; sonrasında IndexedStack'in normal
   // state-koruma davranışı devam ediyor.
-  final Set<int> _visitedTabs = {0};
+  final Set<String> _visitedTabs = {toggleableRootTabs.first.key};
 
-  void _goToTab(int i) {
+  void _goToTab(String key) {
     setState(() {
-      _index = i;
-      _visitedTabs.add(i);
+      _selectedKey = key;
+      _visitedTabs.add(key);
     });
   }
 
-  static const _titles = [
-    'Grafik ve Aylık En Düşük Değerler',
-    'Bildirimler',
-    'Favoriler',
-    'Takip',
-    'Teknik',
-    'Karşılaştır',
-    'Portföy',
-    'Temettü',
-    'Backtest',
-    'Temel Analiz',
-  ];
+  /// Şu an açık sekme Ayarlar'dan kapatılırsa görünür ilk sekmeye geç
+  /// (hiçbiri açık değilse Ayarlar'da kal — o her zaman görünür).
+  void _leaveIfHidden() {
+    if (!_hiddenTabs.contains(_selectedKey)) return;
+    final firstVisible = toggleableRootTabs
+        .map((t) => t.key)
+        .firstWhere((k) => !_hiddenTabs.contains(k), orElse: () => settingsRootTab.key);
+    _selectedKey = firstVisible;
+    _visitedTabs.add(firstVisible);
+  }
 
   @override
   void initState() {
     super.initState();
     _loadFavorites();
+    _loadHiddenTabs();
   }
 
   Future<void> _loadFavorites() async {
@@ -317,29 +314,137 @@ class _RootShellState extends State<RootShell> {
     }
   }
 
+  Future<void> _loadHiddenTabs() async {
+    try {
+      final hidden = await _api.getHiddenTabs();
+      if (!mounted) return;
+      setState(() {
+        _hiddenTabs = hidden.toSet();
+        _leaveIfHidden();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sekme ayarları yüklenemedi: $e')),
+      );
+    }
+  }
+
+  Future<void> _setTabHidden(String key, bool hidden) async {
+    final next = Set<String>.from(_hiddenTabs);
+    if (hidden) {
+      next.add(key);
+    } else {
+      next.remove(key);
+    }
+    try {
+      await _api.setHiddenTabs(next.toList());
+      if (!mounted) return;
+      setState(() {
+        _hiddenTabs = next;
+        _leaveIfHidden();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sekme ayarı kaydedilemedi: $e')),
+      );
+    }
+  }
+
+  /// Bir sekmeye bildirim/kısayol üzerinden doğrudan gidilirken o sekme
+  /// Ayarlar'dan kapatılmış olabilir; kullanıcı açıkça o içeriği istediği
+  /// için sekmeyi sessizce tekrar görünür yapıyoruz (bkz. SettingsScreen'in
+  /// açıklama metni) — aksi halde alt gezinme çubuğunda ona karşılık gelen
+  /// bir düğme olmadan sadece içerik açılırdı.
+  void _unhideIfNeeded(String key) {
+    if (_hiddenTabs.contains(key)) {
+      _setTabHidden(key, false);
+    }
+  }
+
   void _openChartFor(MarketSymbol symbol) {
     setState(() {
       _chartRequestSymbol = symbol;
       _chartRequestId++;
-      _index = 0;
-      _visitedTabs.add(0);
+      _selectedKey = 'chart';
+      _visitedTabs.add('chart');
     });
+    _unhideIfNeeded('chart');
   }
 
   void _openTrackingFor(MarketSymbol symbol) {
     setState(() {
       _trackRequestSymbol = symbol;
       _trackRequestId++;
-      _index = 3;
-      _visitedTabs.add(3);
+      _selectedKey = 'tracking';
+      _visitedTabs.add('tracking');
     });
+    _unhideIfNeeded('tracking');
+  }
+
+  Widget _buildTabChild(String key) {
+    if (!_visitedTabs.contains(key)) return const SizedBox.shrink();
+    switch (key) {
+      case 'chart':
+        return HomeScreen(
+          requestedSymbol: _chartRequestSymbol,
+          requestId: _chartRequestId,
+          favorites: _favorites,
+          onToggleFavorite: _toggleFavorite,
+        );
+      case 'notifications':
+        return NotificationsScreen(
+          onOpenChart: _openChartFor,
+          favorites: _favorites,
+          onToggleFavorite: _toggleFavorite,
+        );
+      case 'favorites':
+        return FavoritesScreen(
+          favorites: _favorites,
+          onToggleFavorite: _toggleFavorite,
+          onTrack: _openTrackingFor,
+        );
+      case 'tracking':
+        return TrackingScreen(
+          requestedSymbol: _trackRequestSymbol,
+          requestId: _trackRequestId,
+        );
+      case 'technical':
+        return TechnicalScreen(favorites: _favorites);
+      case 'comparison':
+        return const ComparisonScreen();
+      case 'portfolio':
+        return const PortfolioScreen();
+      case 'dividend':
+        return const DividendScreen();
+      case 'backtest':
+        return const BacktestScreen();
+      case 'fundamentals':
+        return const FundamentalsScreen();
+      case 'settings':
+        return SettingsScreen(hiddenTabs: _hiddenTabs, onSetHidden: _setTabHidden);
+      default:
+        return const SizedBox.shrink();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final title = _tabOrder.firstWhere((t) => t.key == _selectedKey).title;
+    final navItems = [
+      for (final tab in toggleableRootTabs)
+        if (!_hiddenTabs.contains(tab.key))
+          TabNavItem(key: tab.key, label: tab.navLabel, icon: tab.icon),
+      TabNavItem(
+        key: settingsRootTab.key,
+        label: settingsRootTab.navLabel,
+        icon: settingsRootTab.icon,
+      ),
+    ];
     return Scaffold(
       appBar: AppBar(
-        title: Text('Borsa Takip · ${_titles[_index]}'),
+        title: Text('Borsa Takip · $title'),
         actions: [
           IconButton(
             onPressed: () => Supabase.instance.client.auth.signOut(),
@@ -349,82 +454,13 @@ class _RootShellState extends State<RootShell> {
         ],
       ),
       body: IndexedStack(
-        index: _index,
-        children: [
-          if (_visitedTabs.contains(0))
-            HomeScreen(
-              requestedSymbol: _chartRequestSymbol,
-              requestId: _chartRequestId,
-              favorites: _favorites,
-              onToggleFavorite: _toggleFavorite,
-            )
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(1))
-            NotificationsScreen(
-              onOpenChart: _openChartFor,
-              favorites: _favorites,
-              onToggleFavorite: _toggleFavorite,
-            )
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(2))
-            FavoritesScreen(
-              favorites: _favorites,
-              onToggleFavorite: _toggleFavorite,
-              onTrack: _openTrackingFor,
-            )
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(3))
-            TrackingScreen(
-              requestedSymbol: _trackRequestSymbol,
-              requestId: _trackRequestId,
-            )
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(4))
-            TechnicalScreen(favorites: _favorites)
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(5))
-            const ComparisonScreen()
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(6))
-            const PortfolioScreen()
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(7))
-            const DividendScreen()
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(8))
-            const BacktestScreen()
-          else
-            const SizedBox.shrink(),
-          if (_visitedTabs.contains(9))
-            const FundamentalsScreen()
-          else
-            const SizedBox.shrink(),
-        ],
+        index: _tabOrder.indexWhere((t) => t.key == _selectedKey),
+        children: [for (final tab in _tabOrder) _buildTabChild(tab.key)],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: _goToTab,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.show_chart), label: 'Grafik'),
-          NavigationDestination(
-              icon: Icon(Icons.notifications), label: 'Bildirimler'),
-          NavigationDestination(icon: Icon(Icons.star), label: 'Favoriler'),
-          NavigationDestination(icon: Icon(Icons.insights), label: 'Takip'),
-          NavigationDestination(icon: Icon(Icons.query_stats), label: 'Teknik'),
-          NavigationDestination(icon: Icon(Icons.compare_arrows), label: 'Karşılaştır'),
-          NavigationDestination(icon: Icon(Icons.pie_chart), label: 'Portföy'),
-          NavigationDestination(icon: Icon(Icons.payments), label: 'Temettü'),
-          NavigationDestination(icon: Icon(Icons.history_toggle_off), label: 'Backtest'),
-          NavigationDestination(icon: Icon(Icons.balance), label: 'Temel Analiz'),
-        ],
+      bottomNavigationBar: ScrollableBottomNav(
+        items: navItems,
+        selectedKey: _selectedKey,
+        onSelect: _goToTab,
       ),
     );
   }

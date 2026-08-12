@@ -133,7 +133,13 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   the star toggle next to each watchlist symbol in Bildirimler); a symbol
   can be in either, both, or neither. `TrackedSymbolStore` holds one row per
   user (upserted, no history) for whichever symbol the Takip tab is
-  currently showing. `TechnicalWatchlistStore` is the same shape as
+  currently showing. `TabPreferencesStore` is the same one-row-per-user
+  upsert shape again, but for the Ayarlar tab: a `hidden_tabs` jsonb array
+  of tab keys the user has switched off in the bottom nav (empty/no row =
+  everything visible). It doesn't validate the keys it's given against a
+  known tab list — same "don't overbuild it" simplicity as every other
+  store here — that's the frontend's job (`models/root_tabs.dart`, see the
+  frontend section). `TechnicalWatchlistStore` is the same shape as
   `FavoritesStore` again (own `technical_watchlist` table, no seeding, no
   notification side-effects) — it's just which symbols the Teknik tab
   currently analyzes; unrelated to `WatchlistStore`/`FavoritesStore`.
@@ -162,16 +168,18 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` +
   `supabase_schema_technical.sql` + `supabase_schema_portfolio.sql` +
   `supabase_schema_dividends.sql` + `supabase_schema_fundamentals.sql` +
-  `supabase_schema_fundamentals_watchlist.sql` (run once each, in order,
+  `supabase_schema_fundamentals_watchlist.sql` +
+  `supabase_schema_tab_preferences.sql` (run once each, in order,
   in the Supabase SQL Editor — the second adds
   `user_id` and RLS to the base tables, the third adds the `favorites` and
   `tracked_symbol` tables, the fourth adds `technical_watchlist`, the fifth
   adds `portfolio_holdings`, the sixth adds `dividend_watchlist`, the
   seventh adds `stocks`/`financial_statements`/`stock_scores` — see
   `fundamentals_cache.dart` below for why that last one's RLS pattern is
-  the inverse of every table before it — and the eighth adds
+  the inverse of every table before it — the eighth adds
   `fundamentals_watchlist` plus the one-time `technical_watchlist` →
-  `fundamentals_watchlist` backfill mentioned above). Requires `SUPABASE_URL` and
+  `fundamentals_watchlist` backfill mentioned above, and the ninth adds
+  `tab_preferences`, the `TabPreferencesStore` table above). Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -498,12 +506,17 @@ by an `X-Admin-Secret` header checked against the `ADMIN_SYNC_SECRET` env
 var; endpoint is fully disabled (503) if that var isn't set, so there's no
 default-open admin route; calls `FundamentalsCache.refresh()` directly,
 skipping the 24h freshness check),
+`tab-preferences` (GET returns `{hiddenTabs: [...]}`, POST takes
+`{hiddenTabs: [...]}` and upserts it wholesale — no add/remove pair like
+the watchlist-shaped endpoints, since the frontend always has the full set
+in hand already; backs the Ayarlar tab, see `TabPreferencesStore` above),
 `notifications` (paginated, 100/page, newest first),
 `notifications/check-now` (fire-and-forget — does NOT await the full scan,
 since a large watchlist can take minutes; guarded by a module-level
 `_checkInProgress` flag against overlapping runs). All
 `watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`portfolio*`/
-`dividend-watchlist*`/`fundamentals-watchlist*`/`notifications*` endpoints require `Authorization:
+`dividend-watchlist*`/`fundamentals-watchlist*`/`tab-preferences`/
+`notifications*` endpoints require `Authorization:
 Bearer <token>` (see Auth above); `search`/`candles`/`technical`/
 `dividends`/`backtest`/`fundamentals*`/`health` don't (`admin/sync-stock`
 has its own separate `X-Admin-Secret` gate, not Supabase auth).
@@ -517,7 +530,14 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of ten tab screens behind a bottom `NavigationBar`:
+`IndexedStack` of eleven tab screens behind a bottom `ScrollableBottomNav`
+(`widgets/scrollable_bottom_nav.dart` — a custom nav bar, not the built-in
+Material `NavigationBar`: with eleven possible tabs the built-in widget
+squeezed every label to fit the screen width and wrapped/overlapped text,
+so this one gives each item a fixed width and only switches to a
+horizontally-scrolling `SingleChildScrollView` once the visible items no
+longer fit that width, otherwise stretching evenly like the old widget
+did):
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
 notification feed — its watchlist-management area itself has two sub-tabs,
 "İzleme Listesi" (the existing add/remove/preset UI — the BIST/ABD/Kripto
@@ -607,7 +627,22 @@ them is `true` for the currently-selected symbol,
 page ("Veriler şu an güncellenemedi ... en son bilinen veriler
 gösteriliyor") instead of silently presenting old numbers as current — see
 the `stale`-fallback behavior in `fundamentals_cache.dart` above for when
-this triggers).
+this triggers), and `SettingsScreen` (Ayarlar tab: lets the user hide any
+of the other ten tabs from the bottom nav via a `SwitchListTile` per tab —
+`models/root_tabs.dart`'s `toggleableRootTabs` is the single ordered list
+of tab metadata (key/label/title/icon) shared by this screen, `RootShell`'s
+`IndexedStack` ordering, and its `ScrollableBottomNav` items, so a tab's
+identity is never duplicated three times. Ayarlar itself is not in that
+list and can't be hidden — `RootShell` appends it separately
+(`settingsRootTab`) so there's always a way back in. Persisted per-user in
+Supabase (`tab_preferences` table via the backend's `TabPreferencesStore`,
+see Architecture above) rather than locally, so the choice follows the
+user across devices. If the tab currently on screen gets hidden,
+`RootShell._leaveIfHidden()` switches to the first still-visible tab
+automatically; conversely, tapping a notification or a favorite's track
+icon into a *hidden* Grafik/Takip tab (`_openChartFor`/`_openTrackingFor`)
+silently un-hides it rather than showing content with no corresponding nav
+button — documented inline in `SettingsScreen`'s helper text).
 Screens mostly own their
 own `MarketApi()` instance and don't share state — except favorites:
 `RootShell` owns the one `List<String> _favorites` and passes it plus an

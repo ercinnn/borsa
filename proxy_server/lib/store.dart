@@ -451,6 +451,38 @@ class TrackedSymbolStore {
   }
 }
 
+/// Ayarlar sekmesinde kullanıcının kapattığı alt gezinme sekmeleri —
+/// TrackedSymbolStore ile aynı şekil (kullanıcı başına tek satır, upsert,
+/// geçmiş yok), tek fark tek bir sembol yerine bir anahtar listesi
+/// (jsonb) tutması. Boş liste (satır hiç yoksa da) "tüm sekmeler açık"
+/// anlamına gelir; hangi anahtarların geçerli olduğunu frontend belirler,
+/// burası doğrulama yapmaz (bu kod tabanının diğer store'larıyla aynı
+/// "backend'e sembol/etiket doğrulaması koyma" sadeliği).
+class TabPreferencesStore {
+  final SupabaseTable _table;
+
+  TabPreferencesStore(SupabaseConfig config, http.Client client)
+      : _table = SupabaseTable(client, config, 'tab_preferences');
+
+  Future<List<String>> hiddenTabsFor(String userId) async {
+    final rows = await _table.select(
+      columns: 'hidden_tabs',
+      filters: {'user_id': 'eq.$userId', 'limit': '1'},
+    );
+    if (rows.isEmpty) return [];
+    final raw = rows.first['hidden_tabs'] as List?;
+    return raw?.cast<String>() ?? [];
+  }
+
+  Future<void> setFor(String userId, List<String> hiddenTabs) async {
+    await _table.insert(
+      {'user_id': userId, 'hidden_tabs': hiddenTabs},
+      onConflict: 'user_id',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+    );
+  }
+}
+
 class NotificationStore {
   final SupabaseTable _table;
 
