@@ -102,7 +102,10 @@ and tested independently as shown above.
 Single-file router (`bin/server.dart`) wired to four `lib/` modules:
 
 - `yahoo_client.dart` — `fetchChart()` is the one shared function that hits
-  Yahoo's `/v8/finance/chart/{symbol}` endpoint and parses OHLC candles.
+  Yahoo's `/v8/finance/chart/{symbol}` endpoint and parses OHLC**V** candles
+  (`RawCandle.volume` — added alongside the candlestick chart's volume-bar
+  panel; nullable since Yahoo sometimes omits it, esp. in `12mo`/`4h`
+  synthesized groups, see `_sumVolume()` in `bin/server.dart` below).
   Both `/api/candles` and the monthly-low checker call it — don't duplicate
   Yahoo-parsing logic elsewhere. `fetchDividends()` is a separate function in
   the same file (shares the `userAgent`/`YahooException` plumbing but issues
@@ -343,7 +346,10 @@ whichever candles are actually being returned (post-synthesis for
 value; this is what draws the RSI/MACD sub-panels under the candlestick
 chart in `HomeScreen`/`TrackingScreen`, kept pixel-aligned to the candles
 above by sharing one `slotWidth` computed once in
-`CandlestickChart`'s `LayoutBuilder`, not per-panel),
+`CandlestickChart`'s `LayoutBuilder`, not per-panel; every candle also
+carries `volume` unconditionally — no separate opt-in param, unlike
+`rsi`/`macd` — summed across `12mo`/`4h` grouping by `_sumVolume()`, `null`
+if every raw candle in that group was missing it),
 `watchlist` (GET/add/remove/bulk-add), `favorites` (GET/add/remove, same
 shape as `watchlist`), `tracked` (GET returns `{symbol}` or `{symbol:
 null}`, POST upserts it — backs the Takip tab), `technical` (GET, params:
@@ -539,12 +545,29 @@ range always fits without horizontal scroll, thinning candles as needed
 instead of scrolling. `CandlestickChart` is `Stateful`: thin vertical
 gridlines are drawn at the same group boundaries as the date-label row
 below the chart (`labelEvery`, computed once and shared by both so they
-stay aligned), and a `GestureDetector` (`onTapUp`, same code path on web
-and mobile — no separate touch/mouse handling needed) maps the tap x
-position to a candle index and shows a small `Positioned` overlay `Card`
-with that candle's high/low next to it; tapping a different candle just
-replaces `_selectedIndex`, which naturally closes the old popup and opens
-the new one since it's a single `int?` in `State`, not a stack of dialogs.
+stay aligned). SMA(20)/EMA(50) are computed client-side (`_simpleMovingAverage`/
+`_exponentialMovingAverage`, pure functions over `candle.close` — unlike
+RSI/MACD there's no backend round-trip for these, the math is trivial
+enough not to warrant one) and drawn as two overlay lines directly on the
+price canvas (amber/cyan, `AppColors.amber500` added specifically so they
+don't collide with the emerald/rose candle colors or the cyan/fuchsia MACD
+lines). A crosshair replaces the old tap-only popup: `MouseRegion.onHover`
+(web) and `GestureDetector.onPanDown`/`onPanUpdate` (touch) both feed one
+`_hoverIndex` state, which "snaps" to the nearest candle on both axes
+(vertical line at the candle's x-center, horizontal line at its close
+price — not the raw pointer position, so no need to track pointer Y
+separately). `_RsiPainter`/`_MacdPainter`/`_VolumePainter` each also accept
+`highlightIndex` and draw a matching vertical line segment via the shared
+`_paintCrosshairLine()` helper, so the crosshair visually spans every panel
+even though each panel is its own `CustomPaint`/`CustomPainter`. A
+`_OhlcRibbon` above the chart shows the hovered candle's (or, with nothing
+hovered, the *last* candle's) period/open/high/low/close/volume live —
+close is marked with ▲/▼ in addition to color, so the direction doesn't
+rely on hue alone (red-green color-blindness; same reasoning applied to
+`score_ranking_section.dart`'s `_ScoredSymbolTile`, which used to show only
+a colored `X/100` score with no textual Al/Sat tier — now also prints
+`SummarySignal.forScore(score).label` beneath it, thresholds copied from
+`summarySignalForScore()` in the backend's `technical_analysis.dart`).
 
 Candle "period" labels (e.g. `Q3 25`, `2024-2025`, `31.07.25`, `10.08 14:00`
 for the intraday intervals) are formatted server-side per interval — the

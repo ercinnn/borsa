@@ -12,6 +12,9 @@ class Candle {
   final double? macd;
   final double? macdSignal;
   final double? macdHistogram;
+  // Yahoo bazı mumlarda (özellikle sentezlenmiş 12mo/4h gruplarında, bkz.
+  // proxy_server bin/server.dart _sumVolume) hacim döndürmeyebiliyor.
+  final double? volume;
 
   const Candle({
     required this.period,
@@ -23,6 +26,7 @@ class Candle {
     this.macd,
     this.macdSignal,
     this.macdHistogram,
+    this.volume,
   });
 
   factory Candle.fromJson(Map<String, dynamic> json) {
@@ -36,6 +40,7 @@ class Candle {
       macd: (json['macd'] as num?)?.toDouble(),
       macdSignal: (json['macdSignal'] as num?)?.toDouble(),
       macdHistogram: (json['macdHistogram'] as num?)?.toDouble(),
+      volume: (json['volume'] as num?)?.toDouble(),
     );
   }
 }

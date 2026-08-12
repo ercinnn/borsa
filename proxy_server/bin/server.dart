@@ -198,6 +198,16 @@ String _formatPeriod(String interval, DateTime start, DateTime end) {
   }
 }
 
+// 12mo/4h sentezlemesi birden fazla ham mumu tek muma indirgerken hacmi de
+// toplaması gerekiyor (fiyat gibi son değeri almak değil). Bazı ham mumlarda
+// hacim eksik olabildiğinden (bkz. RawCandle.volume, Yahoo bazen null
+// döndürüyor) sadece dolu olanlar toplanıyor; hiçbiri yoksa null kalıyor.
+num? _sumVolume(List<RawCandle> chunk) {
+  final volumes = chunk.map((c) => c.volume).whereType<num>();
+  if (volumes.isEmpty) return null;
+  return volumes.reduce((a, b) => a + b);
+}
+
 Future<Response> _candlesHandler(Request request) async {
   final params = request.url.queryParameters;
   final symbol = params['symbol'];
@@ -252,6 +262,7 @@ Future<Response> _candlesHandler(Request request) async {
           'high': high,
           'low': low,
           'close': close,
+          'volume': _sumVolume(chunk),
         });
       }
     } else if (interval == '4h') {
@@ -282,6 +293,7 @@ Future<Response> _candlesHandler(Request request) async {
           'high': high,
           'low': low,
           'close': close,
+          'volume': _sumVolume(chunk),
         });
       }
     } else {
@@ -292,6 +304,7 @@ Future<Response> _candlesHandler(Request request) async {
           'high': c.high,
           'low': c.low,
           'close': c.close,
+          'volume': c.volume,
         });
       }
     }

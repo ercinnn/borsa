@@ -6,13 +6,20 @@ import '../theme/app_colors.dart';
 import '../utils/price_format.dart';
 import 'glass_card.dart';
 
-/// Mum grafiği + isteğe bağlı, altında TradingView tarzı RSI/MACD panelleri
-/// (bkz. `MarketApi.candles(includeIndicators: true)` — sadece o zaman
-/// `candle.rsi`/`macd` dolu gelir). Panel açık/kapalıysa fark etmeksizin
-/// tüm bölümler (fiyat ekseni + RSI ekseni + MACD ekseni solda, mum/RSI/MACD
-/// çizimleri + tarih etiketleri sağda) TEK bir yatay `SingleChildScrollView`
-/// içinde, TEK bir `slotWidth` hesabı paylaşılarak dikeyde istiflenir — bu
-/// yüzden panellerin x ekseni mumlarla piksel piksel hizalı kalır.
+/// Mum grafiği + isteğe bağlı, altında TradingView tarzı RSI/MACD/Hacim
+/// panelleri (bkz. `MarketApi.candles(includeIndicators: true)` — sadece o
+/// zaman `candle.rsi`/`macd` dolu gelir; hacim ise her zaman ana `/api/candles`
+/// yanıtında gelir, ayrı bir opt-in gerekmez). Panel açık/kapalıysa fark
+/// etmeksizin tüm bölümler (fiyat ekseni + RSI ekseni + MACD ekseni + hacim
+/// ekseni solda, mum/RSI/MACD/hacim çizimleri + tarih etiketleri sağda) TEK
+/// bir yatay `SingleChildScrollView` içinde, TEK bir `slotWidth` hesabı
+/// paylaşılarak dikeyde istiflenir — bu yüzden panellerin x ekseni mumlarla
+/// piksel piksel hizalı kalır.
+///
+/// Fare imleci (web) veya sürükleme (dokunmatik) ile bir crosshair (artı imleç)
+/// mumları takip eder; en üstteki OHLC şeridi imlecin altındaki mumu (veya
+/// hiçbiri seçili değilse en son mumu) canlı gösterir. SMA(20)/EMA(50) fiyat
+/// panelinin üzerine doğrudan bindirilir (ayrı bir panel değil, overlay).
 class CandlestickChart extends StatefulWidget {
   final CandleResult result;
 
@@ -30,14 +37,21 @@ class _CandlestickChartState extends State<CandlestickChart> {
   static const _axisWidth = 64.0;
   static const _minSlotWidth = 1.5;
   static const _maxSlotWidth = 46.0;
-  static const _popupWidth = 148.0;
+  static const _smaPeriod = 20;
+  static const _emaPeriod = 50;
 
-  int? _selectedIndex;
+  // Crosshair her iki eksende de en yakın muma "yapışıyor" (raw fare/dokunma
+  // pozisyonunu değil, o mumun index'ini tutuyoruz) — hem web'de fare hover'ı
+  // hem dokunmatikte sürükleme aynı tek state'i günceller.
+  int? _hoverIndex;
   bool _showIndicators = true;
   double _minPrice = 0;
   double _maxPrice = 0;
   double _minMacd = 0;
   double _maxMacd = 0;
+  double _maxVolume = 0;
+  List<double?> _sma20 = const [];
+  List<double?> _ema50 = const [];
 
   @override
   void initState() {
@@ -48,20 +62,21 @@ class _CandlestickChartState extends State<CandlestickChart> {
   @override
   void didUpdateWidget(covariant CandlestickChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Yeni sembol/aralık verisi geldiğinde eski mumun popup'ı anlamsız
+    // Yeni sembol/aralık verisi geldiğinde eski crosshair konumu anlamsız
     // kalacağından kapatılıyor.
     if (oldWidget.result != widget.result) {
-      _selectedIndex = null;
+      _hoverIndex = null;
       _computeRanges();
     }
   }
 
   bool get _hasRsi => widget.result.candles.any((c) => c.rsi != null);
   bool get _hasMacd => widget.result.candles.any((c) => c.macd != null);
+  bool get _hasVolume => widget.result.candles.any((c) => c.volume != null);
 
-  // Sadece widget.result değiştiğinde çağrılır; bir muma tıklayıp popup
-  // açmak da build()'i yeniden çalıştırdığından, bu O(n) hesaplamayı her
-  // tıklamada tekrarlamamak için sonuç burada saklanıyor.
+  // Sadece widget.result değiştiğinde çağrılır; crosshair'i hareket ettirmek
+  // de build()'i yeniden çalıştırdığından, bu O(n) hesaplamaları her
+  // hover/sürüklemede tekrarlamamak için sonuçlar burada saklanıyor.
   void _computeRanges() {
     final candles = widget.result.candles;
     if (candles.isEmpty) return;
@@ -85,6 +100,15 @@ class _CandlestickChartState extends State<CandlestickChart> {
       _minMacd = rawMinMacd - macdPad;
       _maxMacd = rawMaxMacd + macdPad;
     }
+
+    _maxVolume = candles.map((c) => c.volume ?? 0).fold(0.0, (a, b) => a > b ? a : b);
+    _sma20 = _simpleMovingAverage(candles, _smaPeriod);
+    _ema50 = _exponentialMovingAverage(candles, _emaPeriod);
+  }
+
+  void _updateHover(Offset localPosition, double slotWidth, int candleCount) {
+    final idx = (localPosition.dx / slotWidth).floor().clamp(0, candleCount - 1);
+    if (idx != _hoverIndex) setState(() => _hoverIndex = idx);
   }
 
   @override
@@ -97,6 +121,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final maxPrice = _maxPrice;
     final showRsi = _showIndicators && _hasRsi;
     final showMacd = _showIndicators && _hasMacd;
+    final showVolume = _hasVolume;
+    final hasSma = candles.length >= _smaPeriod;
+    final hasEma = candles.length >= _emaPeriod;
+    final ribbonCandle = candles[_hoverIndex ?? candles.length - 1];
 
     return GlassCard(
       padding: const EdgeInsets.all(12),
@@ -112,6 +140,14 @@ class _CandlestickChartState extends State<CandlestickChart> {
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               ),
+              if (hasSma) ...[
+                const _LegendDot(color: AppColors.amber500, label: 'SMA20'),
+                const SizedBox(width: 10),
+              ],
+              if (hasEma) ...[
+                const _LegendDot(color: AppColors.cyan500, label: 'EMA50'),
+                const SizedBox(width: 10),
+              ],
               if (_hasRsi || _hasMacd)
                 IconButton(
                   icon: Icon(
@@ -127,6 +163,8 @@ class _CandlestickChartState extends State<CandlestickChart> {
                 ),
             ],
           ),
+          const SizedBox(height: 6),
+          _OhlcRibbon(candle: ribbonCandle, currency: widget.result.currency),
           const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -151,6 +189,14 @@ class _CandlestickChartState extends State<CandlestickChart> {
                       child: _MacdAxis(minMacd: _minMacd, maxMacd: _maxMacd),
                     ),
                   ],
+                  if (showVolume) ...[
+                    const SizedBox(height: _sectionGap),
+                    SizedBox(
+                      width: _axisWidth,
+                      height: _indicatorHeight,
+                      child: _VolumeAxis(maxVolume: _maxVolume),
+                    ),
+                  ],
                   SizedBox(height: _sectionGap + _labelHeight),
                 ],
               ),
@@ -169,93 +215,100 @@ class _CandlestickChartState extends State<CandlestickChart> {
                     final labelEvery =
                         (60 / slotWidth).ceil().clamp(1, candles.length);
 
+                    void handlePointer(Offset local) =>
+                        _updateHover(local, slotWidth, candles.length);
+
                     return SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
                         width: contentWidth,
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              height: _chartHeight,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTapUp: (details) {
-                                      final idx =
-                                          (details.localPosition.dx / slotWidth)
-                                              .floor()
-                                              .clamp(0, candles.length - 1);
-                                      setState(() {
-                                        _selectedIndex = idx;
-                                      });
-                                    },
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.precise,
+                          onHover: (e) => handlePointer(e.localPosition),
+                          onExit: (_) => setState(() => _hoverIndex = null),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapUp: (d) => handlePointer(d.localPosition),
+                            onPanDown: (d) => handlePointer(d.localPosition),
+                            onPanUpdate: (d) => handlePointer(d.localPosition),
+                            child: Column(
+                              children: [
+                                SizedBox(
+                                  height: _chartHeight,
+                                  child: CustomPaint(
+                                    painter: _CandlestickPainter(
+                                      candles: candles,
+                                      minPrice: minPrice,
+                                      maxPrice: maxPrice,
+                                      slotWidth: slotWidth,
+                                      candleWidth: candleWidth,
+                                      labelEvery: labelEvery,
+                                      sma: hasSma ? _sma20 : const [],
+                                      ema: hasEma ? _ema50 : const [],
+                                      highlightIndex: _hoverIndex,
+                                    ),
+                                    size: Size(contentWidth, _chartHeight),
+                                  ),
+                                ),
+                                if (showRsi) ...[
+                                  const SizedBox(height: _sectionGap),
+                                  SizedBox(
+                                    height: _indicatorHeight,
                                     child: CustomPaint(
-                                      painter: _CandlestickPainter(
+                                      painter: _RsiPainter(
                                         candles: candles,
-                                        minPrice: minPrice,
-                                        maxPrice: maxPrice,
+                                        slotWidth: slotWidth,
+                                        highlightIndex: _hoverIndex,
+                                      ),
+                                      size: Size(contentWidth, _indicatorHeight),
+                                    ),
+                                  ),
+                                ],
+                                if (showMacd) ...[
+                                  const SizedBox(height: _sectionGap),
+                                  SizedBox(
+                                    height: _indicatorHeight,
+                                    child: CustomPaint(
+                                      painter: _MacdPainter(
+                                        candles: candles,
                                         slotWidth: slotWidth,
                                         candleWidth: candleWidth,
-                                        labelEvery: labelEvery,
+                                        minMacd: _minMacd,
+                                        maxMacd: _maxMacd,
+                                        highlightIndex: _hoverIndex,
                                       ),
-                                      size: Size(contentWidth, _chartHeight),
+                                      size: Size(contentWidth, _indicatorHeight),
                                     ),
                                   ),
-                                  if (_selectedIndex != null)
-                                    _CandleInfoPopup(
-                                      candle: candles[_selectedIndex!],
-                                      left: ((_selectedIndex! + 0.5) * slotWidth -
-                                              _popupWidth / 2)
-                                          .clamp(
-                                        0.0,
-                                        (contentWidth - _popupWidth)
-                                            .clamp(0.0, double.infinity),
-                                      ),
-                                      width: _popupWidth,
-                                      onClose: () =>
-                                          setState(() => _selectedIndex = null),
-                                    ),
                                 ],
-                              ),
-                            ),
-                            if (showRsi) ...[
-                              const SizedBox(height: _sectionGap),
-                              SizedBox(
-                                height: _indicatorHeight,
-                                child: CustomPaint(
-                                  painter: _RsiPainter(candles: candles, slotWidth: slotWidth),
-                                  size: Size(contentWidth, _indicatorHeight),
-                                ),
-                              ),
-                            ],
-                            if (showMacd) ...[
-                              const SizedBox(height: _sectionGap),
-                              SizedBox(
-                                height: _indicatorHeight,
-                                child: CustomPaint(
-                                  painter: _MacdPainter(
+                                if (showVolume) ...[
+                                  const SizedBox(height: _sectionGap),
+                                  SizedBox(
+                                    height: _indicatorHeight,
+                                    child: CustomPaint(
+                                      painter: _VolumePainter(
+                                        candles: candles,
+                                        slotWidth: slotWidth,
+                                        candleWidth: candleWidth,
+                                        maxVolume: _maxVolume,
+                                        highlightIndex: _hoverIndex,
+                                      ),
+                                      size: Size(contentWidth, _indicatorHeight),
+                                    ),
+                                  ),
+                                ],
+                                SizedBox(height: _sectionGap),
+                                SizedBox(
+                                  height: _labelHeight,
+                                  child: _PeriodLabels(
                                     candles: candles,
                                     slotWidth: slotWidth,
-                                    candleWidth: candleWidth,
-                                    minMacd: _minMacd,
-                                    maxMacd: _maxMacd,
+                                    labelEvery: labelEvery,
                                   ),
-                                  size: Size(contentWidth, _indicatorHeight),
                                 ),
-                              ),
-                            ],
-                            SizedBox(height: _sectionGap),
-                            SizedBox(
-                              height: _labelHeight,
-                              child: _PeriodLabels(
-                                candles: candles,
-                                slotWidth: slotWidth,
-                                labelEvery: labelEvery,
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     );
@@ -270,67 +323,127 @@ class _CandlestickChartState extends State<CandlestickChart> {
   }
 }
 
-class _CandleInfoPopup extends StatelessWidget {
-  final Candle candle;
-  final double left;
-  final double width;
-  final VoidCallback onClose;
+/// [candles]'ın kapanış fiyatları üzerinden basit hareketli ortalama.
+/// İlk `period - 1` eleman için yeterli geçmiş olmadığından `null`.
+List<double?> _simpleMovingAverage(List<Candle> candles, int period) {
+  final out = List<double?>.filled(candles.length, null);
+  if (candles.length < period) return out;
+  double sum = 0;
+  for (var i = 0; i < candles.length; i++) {
+    sum += candles[i].close;
+    if (i >= period) sum -= candles[i - period].close;
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
 
-  const _CandleInfoPopup({
-    required this.candle,
-    required this.left,
-    required this.width,
-    required this.onClose,
-  });
+/// [period] büyüklüğünde bir üstel hareketli ortalama — ilk değer klasik
+/// yaklaşımla ilk `period` kapanışın basit ortalamasıyla başlatılır
+/// (`seed`), sonrasında standart EMA katsayısıyla (`2 / (period + 1)`)
+/// devam eder.
+List<double?> _exponentialMovingAverage(List<Candle> candles, int period) {
+  final out = List<double?>.filled(candles.length, null);
+  if (candles.length < period) return out;
+  final k = 2 / (period + 1);
+  double seed = 0;
+  for (var i = 0; i < period; i++) {
+    seed += candles[i].close;
+  }
+  var prev = seed / period;
+  out[period - 1] = prev;
+  for (var i = period; i < candles.length; i++) {
+    prev = candles[i].close * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+
+/// Büyük hacim/tutar değerlerini K/M/B ekleriyle kısaltır (ör. 2.4M).
+String _formatCompact(double value) {
+  final abs = value.abs();
+  final sign = value.isNegative ? '-' : '';
+  if (abs >= 1e9) return '$sign${(abs / 1e9).toStringAsFixed(1)}B';
+  if (abs >= 1e6) return '$sign${(abs / 1e6).toStringAsFixed(1)}M';
+  if (abs >= 1e3) return '$sign${(abs / 1e3).toStringAsFixed(1)}K';
+  return '$sign${abs.toStringAsFixed(0)}';
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      left: left,
-      top: 4,
-      width: width,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.slate900.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 2,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(1)),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    candle.period,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.slate100),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: onClose,
-                  child: const Icon(Icons.close, size: 14, color: AppColors.slate400),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text('Yüksek: ${formatPrice(candle.high)}',
-                style: GoogleFonts.robotoMono(
-                    fontSize: 11, color: AppColors.emerald400)),
-            Text('Düşük: ${formatPrice(candle.low)}',
-                style: GoogleFonts.robotoMono(fontSize: 11, color: AppColors.rose500)),
-            if (candle.rsi != null) ...[
-              const SizedBox(height: 4),
-              Text('RSI: ${candle.rsi!.toStringAsFixed(1)}',
-                  style: GoogleFonts.robotoMono(fontSize: 11, color: AppColors.cyan500)),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 10, color: AppColors.slate400)),
+      ],
+    );
+  }
+}
+
+/// Crosshair'in altındaki mumu (yoksa en son mumu) canlı gösteren üst şerit
+/// — "Financial Trading Terminal" tarzı dinamik OHLC göstergesi. Kapanış
+/// rengi sadece yeşil/kırmızı değil, ▲/▼ okuyla da işaretleniyor (renk-körü
+/// erişilebilirliği için — bkz. CLAUDE.md tasarım denetimi notları).
+class _OhlcRibbon extends StatelessWidget {
+  final Candle candle;
+  final String currency;
+
+  const _OhlcRibbon({required this.candle, required this.currency});
+
+  @override
+  Widget build(BuildContext context) {
+    final isUp = candle.close >= candle.open;
+    final changePct =
+        candle.open == 0 ? 0.0 : (candle.close - candle.open) / candle.open * 100;
+    final color = isUp ? AppColors.emerald400 : AppColors.rose500;
+    final mono = GoogleFonts.robotoMono(fontSize: 11, color: AppColors.slate100);
+
+    Widget field(String label, String value, {Color? valueColor}) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 14),
+        child: RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: '$label ',
+                style: TextStyle(fontSize: 10, color: AppColors.slate400),
+              ),
+              TextSpan(text: value, style: mono.copyWith(color: valueColor ?? mono.color)),
             ],
-          ],
+          ),
         ),
-      ),
+      );
+    }
+
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 14),
+          child: Text(candle.period,
+              style: TextStyle(fontSize: 11, color: AppColors.slate400, fontWeight: FontWeight.w600)),
+        ),
+        field('AÇ', formatPrice(candle.open)),
+        field('YÜK', formatPrice(candle.high)),
+        field('DÜŞ', formatPrice(candle.low)),
+        field(
+          'KAP',
+          '${isUp ? '▲' : '▼'} ${formatPrice(candle.close)} '
+              '(${isUp ? '+' : ''}${changePct.toStringAsFixed(2)}%)',
+          valueColor: color,
+        ),
+        if (candle.volume != null) field('HACİM', _formatCompact(candle.volume!)),
+      ],
     );
   }
 }
@@ -437,6 +550,38 @@ class _MacdAxis extends StatelessWidget {
   }
 }
 
+class _VolumeAxis extends StatelessWidget {
+  final double maxVolume;
+  const _VolumeAxis({required this.maxVolume});
+
+  @override
+  Widget build(BuildContext context) {
+    final labelStyle = GoogleFonts.robotoMono(fontSize: 9, color: AppColors.slate400);
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(_formatCompact(maxVolume), style: labelStyle),
+        const Text('0', style: TextStyle(fontSize: 9, color: AppColors.slate400)),
+      ],
+    );
+  }
+}
+
+/// Tüm panel painter'ları için ortak: [highlightIndex] doluysa o mumun
+/// x-merkezinde ince, panelin tam boyunu kaplayan bir crosshair çizgisi
+/// çizer. Fiyat panelinin kendisi ayrıca yatay çizgi + kapanış noktası da
+/// ekliyor (bkz. _CandlestickPainter) — burası alt panellerde (RSI/MACD/
+/// Hacim) görsel sürekliliği sağlayan ortak parça.
+void _paintCrosshairLine(Canvas canvas, Size size, double slotWidth, int? highlightIndex) {
+  if (highlightIndex == null) return;
+  final x = highlightIndex * slotWidth + slotWidth / 2;
+  final paint = Paint()
+    ..color = AppColors.slate100.withValues(alpha: 0.35)
+    ..strokeWidth = 1;
+  canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+}
+
 class _CandlestickPainter extends CustomPainter {
   final List<Candle> candles;
   final double minPrice;
@@ -444,6 +589,9 @@ class _CandlestickPainter extends CustomPainter {
   final double slotWidth;
   final double candleWidth;
   final int labelEvery;
+  final List<double?> sma;
+  final List<double?> ema;
+  final int? highlightIndex;
 
   _CandlestickPainter({
     required this.candles,
@@ -452,12 +600,39 @@ class _CandlestickPainter extends CustomPainter {
     required this.slotWidth,
     required this.candleWidth,
     required this.labelEvery,
+    required this.sma,
+    required this.ema,
+    required this.highlightIndex,
   });
 
   double _priceToY(double price, double height) {
     final range = maxPrice - minPrice;
     if (range == 0) return height / 2;
     return height - (price - minPrice) / range * height;
+  }
+
+  void _drawOverlayLine(Canvas canvas, Size size, List<double?> series, Color color) {
+    if (series.isEmpty) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.4
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path();
+    var started = false;
+    for (var i = 0; i < series.length; i++) {
+      final v = series[i];
+      if (v == null) continue;
+      final x = i * slotWidth + slotWidth / 2;
+      final y = _priceToY(v, size.height);
+      if (!started) {
+        path.moveTo(x, y);
+        started = true;
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, paint);
   }
 
   @override
@@ -507,6 +682,33 @@ class _CandlestickPainter extends CustomPainter {
       );
       canvas.drawRect(rect, bodyPaint);
     }
+
+    _drawOverlayLine(canvas, size, sma, AppColors.amber500);
+    _drawOverlayLine(canvas, size, ema, AppColors.cyan500);
+
+    if (highlightIndex != null) {
+      final idx = highlightIndex!.clamp(0, candles.length - 1);
+      final c = candles[idx];
+      final x = idx * slotWidth + slotWidth / 2;
+      final closeY = _priceToY(c.close, size.height);
+
+      final linePaint = Paint()
+        ..color = AppColors.slate100.withValues(alpha: 0.35)
+        ..strokeWidth = 1;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), linePaint);
+      canvas.drawLine(Offset(0, closeY), Offset(size.width, closeY), linePaint);
+
+      final markerColor = c.close >= c.open ? AppColors.emerald400 : AppColors.rose500;
+      canvas.drawCircle(Offset(x, closeY), 3.2, Paint()..color = markerColor);
+      canvas.drawCircle(
+        Offset(x, closeY),
+        3.2,
+        Paint()
+          ..color = AppColors.slate950
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2,
+      );
+    }
   }
 
   @override
@@ -515,15 +717,19 @@ class _CandlestickPainter extends CustomPainter {
         oldDelegate.minPrice != minPrice ||
         oldDelegate.maxPrice != maxPrice ||
         oldDelegate.slotWidth != slotWidth ||
-        oldDelegate.labelEvery != labelEvery;
+        oldDelegate.labelEvery != labelEvery ||
+        oldDelegate.sma != sma ||
+        oldDelegate.ema != ema ||
+        oldDelegate.highlightIndex != highlightIndex;
   }
 }
 
 class _RsiPainter extends CustomPainter {
   final List<Candle> candles;
   final double slotWidth;
+  final int? highlightIndex;
 
-  _RsiPainter({required this.candles, required this.slotWidth});
+  _RsiPainter({required this.candles, required this.slotWidth, required this.highlightIndex});
 
   double _y(double value, double height) => height - (value / 100) * height;
 
@@ -557,11 +763,15 @@ class _RsiPainter extends CustomPainter {
       }
     }
     canvas.drawPath(path, linePaint);
+
+    _paintCrosshairLine(canvas, size, slotWidth, highlightIndex);
   }
 
   @override
   bool shouldRepaint(covariant _RsiPainter oldDelegate) {
-    return oldDelegate.candles != candles || oldDelegate.slotWidth != slotWidth;
+    return oldDelegate.candles != candles ||
+        oldDelegate.slotWidth != slotWidth ||
+        oldDelegate.highlightIndex != highlightIndex;
   }
 }
 
@@ -571,6 +781,7 @@ class _MacdPainter extends CustomPainter {
   final double candleWidth;
   final double minMacd;
   final double maxMacd;
+  final int? highlightIndex;
 
   _MacdPainter({
     required this.candles,
@@ -578,6 +789,7 @@ class _MacdPainter extends CustomPainter {
     required this.candleWidth,
     required this.minMacd,
     required this.maxMacd,
+    required this.highlightIndex,
   });
 
   double _y(double value, double height) {
@@ -635,6 +847,8 @@ class _MacdPainter extends CustomPainter {
 
     drawLine((c) => c.macd, AppColors.cyan500);
     drawLine((c) => c.macdSignal, AppColors.fuchsia600);
+
+    _paintCrosshairLine(canvas, size, slotWidth, highlightIndex);
   }
 
   @override
@@ -642,6 +856,63 @@ class _MacdPainter extends CustomPainter {
     return oldDelegate.candles != candles ||
         oldDelegate.slotWidth != slotWidth ||
         oldDelegate.minMacd != minMacd ||
-        oldDelegate.maxMacd != maxMacd;
+        oldDelegate.maxMacd != maxMacd ||
+        oldDelegate.highlightIndex != highlightIndex;
+  }
+}
+
+/// Fiyat mumlarıyla aynı yükseliş/düşüş renginde, panelin alt kenarından
+/// yükselen çubuklar — "Financial Trading Terminal" spec'indeki "hacim
+/// çubukları" gereksiniminin karşılığı. Kendi paneli olarak, RSI/MACD ile
+/// aynı desende (Candle.volume her zaman ana /api/candles yanıtında geldiği
+/// için ayrı bir opt-in/toggle gerekmiyor, bkz. sınıf başı doc yorumu).
+class _VolumePainter extends CustomPainter {
+  final List<Candle> candles;
+  final double slotWidth;
+  final double candleWidth;
+  final double maxVolume;
+  final int? highlightIndex;
+
+  _VolumePainter({
+    required this.candles,
+    required this.slotWidth,
+    required this.candleWidth,
+    required this.maxVolume,
+    required this.highlightIndex,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (maxVolume > 0) {
+      for (var i = 0; i < candles.length; i++) {
+        final v = candles[i].volume;
+        if (v == null) continue;
+        final c = candles[i];
+        final isUp = c.close >= c.open;
+        final x = i * slotWidth + slotWidth / 2;
+        final barHeight = (v / maxVolume) * size.height;
+        final barPaint = Paint()
+          ..color = (isUp ? AppColors.emerald400 : AppColors.rose500).withValues(alpha: 0.55);
+        canvas.drawRect(
+          Rect.fromLTRB(
+            x - candleWidth / 2,
+            size.height - barHeight,
+            x + candleWidth / 2,
+            size.height,
+          ),
+          barPaint,
+        );
+      }
+    }
+
+    _paintCrosshairLine(canvas, size, slotWidth, highlightIndex);
+  }
+
+  @override
+  bool shouldRepaint(covariant _VolumePainter oldDelegate) {
+    return oldDelegate.candles != candles ||
+        oldDelegate.slotWidth != slotWidth ||
+        oldDelegate.maxVolume != maxVolume ||
+        oldDelegate.highlightIndex != highlightIndex;
   }
 }

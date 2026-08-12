@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/scored_symbol.dart';
+import '../models/technical_analysis.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../utils/price_format.dart';
@@ -245,10 +246,24 @@ class _ScoredSymbolTile extends StatelessWidget {
                     ? [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 14)]
                     : null,
               ),
-              child: Text(
-                '${item.score}/100',
-                style: GoogleFonts.robotoMono(
-                    color: color, fontWeight: FontWeight.w800, fontSize: 13),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${item.score}/100',
+                    style: GoogleFonts.robotoMono(
+                        color: color, fontWeight: FontWeight.w800, fontSize: 13),
+                  ),
+                  // Sadece renkle değil, renk-körü kullanıcılar için de
+                  // ayırt edilebilir olsun diye kademe adı da yazılıyor
+                  // (bkz. SummarySignal.forScore doc yorumu).
+                  Text(
+                    SummarySignal.forScore(item.score).label,
+                    style: TextStyle(
+                        color: color, fontWeight: FontWeight.w600, fontSize: 10),
+                  ),
+                ],
               ),
             ),
           ],

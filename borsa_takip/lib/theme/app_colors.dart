@@ -27,6 +27,10 @@ class AppColors {
   static const rose500 = Color(0xFFF43F5E);
   static const fuchsia600 = Color(0xFFC026D3);
 
+  // Mum grafiğindeki SMA/EMA overlay çizgileri için — yükseliş/düşüş
+  // renkleriyle (emerald/rose) karışmasın diye üçüncü, nötr bir vurgu.
+  static const amber500 = Color(0xFFF59E0B);
+
   static const bullishGradient = LinearGradient(
     colors: [emerald400, cyan500],
     begin: Alignment.centerLeft,

@@ -31,6 +31,20 @@ enum SummarySignal {
         _ => SummarySignal.neutral,
       };
 
+  /// 0-100 arası bir puanı 5 kademeli özete çevirir — proxy_server/lib/
+  /// technical_analysis.dart'taki `summarySignalForScore` ile aynı eşikler
+  /// (bkz. o dosyanın doc yorumu). Puan Sıralaması listesi (bkz.
+  /// widgets/score_ranking_section.dart) sadece renkle değil bu metinsel
+  /// etiketle de kademeyi gösterir — renk-körü erişilebilirliği için.
+  static SummarySignal forScore(int score) {
+    final ratio = score / 100;
+    if (ratio >= 0.8) return SummarySignal.strongBuy;
+    if (ratio >= 0.6) return SummarySignal.buy;
+    if (ratio > 0.4) return SummarySignal.neutral;
+    if (ratio > 0.2) return SummarySignal.sell;
+    return SummarySignal.strongSell;
+  }
+
   String get label => switch (this) {
         SummarySignal.strongBuy => 'Güçlü Al',
         SummarySignal.buy => 'Al',

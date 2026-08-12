@@ -20,8 +20,9 @@ class RawCandle {
   final num high;
   final num low;
   final num close;
+  final num? volume;
 
-  RawCandle(this.date, this.open, this.high, this.low, this.close);
+  RawCandle(this.date, this.open, this.high, this.low, this.close, [this.volume]);
 }
 
 class ChartData {
@@ -105,6 +106,7 @@ Future<ChartData> fetchChart(
   final highs = (quote['high'] as List?) ?? [];
   final lows = (quote['low'] as List?) ?? [];
   final closes = (quote['close'] as List?) ?? [];
+  final volumes = (quote['volume'] as List?) ?? [];
 
   final candles = <RawCandle>[];
   for (var i = 0; i < timestamps.length && i < lows.length; i++) {
@@ -119,7 +121,9 @@ Future<ChartData> fetchChart(
       (timestamps[i] as int) * 1000,
       isUtc: true,
     );
-    candles.add(RawCandle(date, open as num, high as num, low as num, close as num));
+    final volume = i < volumes.length ? volumes[i] as num? : null;
+    candles.add(
+        RawCandle(date, open as num, high as num, low as num, close as num, volume));
   }
 
   final data = ChartData(meta['currency'] as String? ?? '', candles);
