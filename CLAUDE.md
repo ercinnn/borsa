@@ -118,7 +118,7 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   calculation below.
 - `store.dart` — `WatchlistStore`, `NotificationStore`, `FavoritesStore`,
   `TrackedSymbolStore`, `TechnicalWatchlistStore`, `DividendWatchlistStore`,
-  all persisted in a Supabase Postgres project via
+  `FundamentalsWatchlistStore`, all persisted in a Supabase Postgres project via
   `supabase_client.dart` (a minimal PostgREST wrapper, not the official
   SDK). Multi-tenant: every method takes a `userId` and queries Supabase
   filtered to that user (no in-memory cache — a single-user leftover from
@@ -138,10 +138,8 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   notification side-effects) — it's just which symbols the Teknik tab
   currently analyzes; unrelated to `WatchlistStore`/`FavoritesStore`.
   `TechnicalWatchlistStore.allRows()` (mirrors `WatchlistStore.allRows()`)
-  returns every user's `(user_id, symbol)` pairs; `fundamentals_cache.dart`'s
-  background pre-sync job uses it to find the distinct symbol set to keep
-  warm, since Temel Analiz reuses the same watchlist as Teknik.
-  `PortfolioStore` backs the Portföy tab: one row per `(user_id, symbol)`
+  returns every user's `(user_id, symbol)` pairs. `PortfolioStore` backs
+  the Portföy tab: one row per `(user_id, symbol)`
   (unique index, upserted via `resolution=merge-duplicates` — same pattern
   as `TrackedSymbolStore.setFor`), storing only `quantity`/`cost_basis`.
   Re-adding a symbol already held **overwrites** it rather than merging a
@@ -151,17 +149,29 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   again (own `dividend_watchlist` table, no seeding, no notification
   side-effects) — it's just which symbols the Temettü tab shows; unrelated
   to `WatchlistStore`/`FavoritesStore`/`PortfolioStore`.
+  `FundamentalsWatchlistStore` is the same shape again (own
+  `fundamentals_watchlist` table, own `allRows()`, no seeding, no
+  notification side-effects) — it's just which symbols the Temel Analiz
+  tab shows. It used to reuse `TechnicalWatchlistStore` directly (Teknik
+  and Temel Analiz shared one list); the two were split apart into
+  independent stores per a later request, with a one-time backfill (see
+  `supabase_schema_fundamentals_watchlist.sql`) copying each user's
+  existing `technical_watchlist` rows into the new table so no one's
+  Temel Analiz view went empty on the switch.
   Table schema: `proxy_server/supabase_schema.sql` +
   `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` +
   `supabase_schema_technical.sql` + `supabase_schema_portfolio.sql` +
-  `supabase_schema_dividends.sql` + `supabase_schema_fundamentals.sql` (run
-  once each, in order, in the Supabase SQL Editor — the second adds
+  `supabase_schema_dividends.sql` + `supabase_schema_fundamentals.sql` +
+  `supabase_schema_fundamentals_watchlist.sql` (run once each, in order,
+  in the Supabase SQL Editor — the second adds
   `user_id` and RLS to the base tables, the third adds the `favorites` and
   `tracked_symbol` tables, the fourth adds `technical_watchlist`, the fifth
   adds `portfolio_holdings`, the sixth adds `dividend_watchlist`, the
   seventh adds `stocks`/`financial_statements`/`stock_scores` — see
   `fundamentals_cache.dart` below for why that last one's RLS pattern is
-  the inverse of every table before it). Requires `SUPABASE_URL` and
+  the inverse of every table before it — and the eighth adds
+  `fundamentals_watchlist` plus the one-time `technical_watchlist` →
+  `fundamentals_watchlist` backfill mentioned above). Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -388,7 +398,7 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   still surfaces a hard error. `syncWatchlistedSymbols()` is a background
   job (registered in `main()` below, same trigger pattern as
   `TechnicalScoreCache`'s refresh) that walks every distinct symbol across
-  all users' `TechnicalWatchlistStore` rows and calls `ensureFresh()` on
+  all users' `FundamentalsWatchlistStore` rows and calls `ensureFresh()` on
   each — deliberately sequential with a 4s pause *after each symbol that
   actually hit Yahoo* (already-fresh symbols are skipped instantly, no
   wait), unlike `MonthlyLowChecker`'s 4-wide-parallel-batches-every-300ms:
@@ -469,6 +479,10 @@ stale) rather than hanging the request. Each response also includes a
 `overview`, `computed_at` for the other three) so the frontend can show a
 "veriler güncellenemedi, en son bilinen veriler gösteriliyor" banner
 instead of silently serving old numbers as if they were current,
+`fundamentals-watchlist` (GET/add/remove, same shape as `favorites`/
+`technical-watchlist`/`dividend-watchlist` — which symbols the Temel
+Analiz tab shows; independent of `technical-watchlist` despite the two
+looking related, see `FundamentalsWatchlistStore` above),
 `admin/sync-stock/{symbol}` (POST, **not** Supabase-authenticated — guarded
 by an `X-Admin-Secret` header checked against the `ADMIN_SYNC_SECRET` env
 var; endpoint is fully disabled (503) if that var isn't set, so there's no
@@ -479,7 +493,7 @@ skipping the 24h freshness check),
 since a large watchlist can take minutes; guarded by a module-level
 `_checkInProgress` flag against overlapping runs). All
 `watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`portfolio*`/
-`dividend-watchlist*`/`notifications*` endpoints require `Authorization:
+`dividend-watchlist*`/`fundamentals-watchlist*`/`notifications*` endpoints require `Authorization:
 Bearer <token>` (see Auth above); `search`/`candles`/`technical`/
 `dividends`/`backtest`/`fundamentals*`/`health` don't (`admin/sync-stock`
 has its own separate `X-Admin-Secret` gate, not Supabase auth).
@@ -548,12 +562,15 @@ cyan, buy-and-hold in muted slate as the "reference" line) plotting both as
 % return over time, and a trade-by-trade table; see `backtest.dart` in the
 backend section for the simulation itself and its simplifying assumptions),
 and `FundamentalsScreen` (Temel Analiz tab: DCF Fair Value, Piotroski
-F-Score, Altman Z-Score, ProTips for whatever symbol is selected — the one
-deliberate exception to every other tab's "own independent watchlist"
-pattern: it reuses `TechnicalWatchlistStore` directly, so whatever's added
-in Teknik shows up here too and vice versa, rather than introducing yet
-another near-identical Supabase table; when a calculation isn't available
-for a symbol — the common case being Altman Z-Score and two Piotroski
+F-Score, Altman Z-Score, ProTips for whatever symbol is selected — has its
+own independent `FundamentalsWatchlistStore`-backed watchlist, same
+pattern as every other tab (Teknik/Temettü/Favoriler each own their own
+list); it used to reuse `TechnicalWatchlistStore` directly (a symbol added
+in Teknik showed up here too and vice versa) but that sharing was split
+apart per a later request — see `FundamentalsWatchlistStore` in the
+backend section above for the one-time backfill that preserved existing
+users' Temel Analiz symbols across the switch; when a calculation isn't
+available for a symbol — the common case being Altman Z-Score and two Piotroski
 criteria for banks/financial-sector stocks — the card shows the backend's
 `error` string instead of a bare blank value; see `fundamental_analysis.dart`
 and `fundamentals_cache.dart` in the backend section for the computation,

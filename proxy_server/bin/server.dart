@@ -905,6 +905,33 @@ Future<Response> _dividendWatchlistRemoveHandler(
   return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
+Future<Response> _fundamentalsWatchlistGetHandler(Request request, String userId,
+    FundamentalsWatchlistStore fundamentalsWatchlist) async {
+  return _json({'symbols': await fundamentalsWatchlist.symbolsFor(userId)});
+}
+
+Future<Response> _fundamentalsWatchlistAddHandler(Request request, String userId,
+    FundamentalsWatchlistStore fundamentalsWatchlist) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final added = await fundamentalsWatchlist.add(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'added': added});
+}
+
+Future<Response> _fundamentalsWatchlistRemoveHandler(Request request, String userId,
+    FundamentalsWatchlistStore fundamentalsWatchlist) async {
+  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+  final symbol = body['symbol'] as String?;
+  if (symbol == null || symbol.trim().isEmpty) {
+    return _json({'error': 'symbol gerekli'}, status: 400);
+  }
+  final removed = await fundamentalsWatchlist.remove(userId, symbol);
+  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
+}
+
 Future<Response> _portfolioGetHandler(
     Request request, String userId, PortfolioStore portfolio) async {
   final holdings = await portfolio.holdingsFor(userId);
@@ -993,6 +1020,7 @@ void main(List<String> args) async {
   final favorites = FavoritesStore(supabaseConfig, _httpClient);
   final technicalWatchlist = TechnicalWatchlistStore(supabaseConfig, _httpClient);
   final dividendWatchlist = DividendWatchlistStore(supabaseConfig, _httpClient);
+  final fundamentalsWatchlist = FundamentalsWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
   final technicalScoreCache =
       TechnicalScoreCache(_httpClient, watchlist, notifications);
@@ -1037,11 +1065,11 @@ void main(List<String> args) async {
   // bilerek çok yavaş tempoda, MonthlyLowChecker/TechnicalScoreCache'in
   // aksine amaç paralellik değil Yahoo'nun crumb endpoint'ine yayılmış yük).
   // 24 saatlik DB cache TTL'sinden daha sık: cold start sonrası taze kalsın.
-  fundamentalsCache.syncWatchlistedSymbols(technicalWatchlist).catchError((e) {
+  fundamentalsCache.syncWatchlistedSymbols(fundamentalsWatchlist).catchError((e) {
     stderr.writeln('İlk temel analiz senkronizasyonu başarısız: $e');
   });
   Timer.periodic(const Duration(hours: 6), (_) {
-    fundamentalsCache.syncWatchlistedSymbols(technicalWatchlist).catchError((e) {
+    fundamentalsCache.syncWatchlistedSymbols(fundamentalsWatchlist).catchError((e) {
       stderr.writeln('Temel analiz senkronizasyonu başarısız: $e');
     });
   });
@@ -1130,6 +1158,21 @@ void main(List<String> args) async {
       '/api/dividend-watchlist/remove',
       _withAuth(supabaseConfig,
           (r, uid) => _dividendWatchlistRemoveHandler(r, uid, dividendWatchlist)),
+    )
+    ..get(
+      '/api/fundamentals-watchlist',
+      _withAuth(supabaseConfig,
+          (r, uid) => _fundamentalsWatchlistGetHandler(r, uid, fundamentalsWatchlist)),
+    )
+    ..post(
+      '/api/fundamentals-watchlist/add',
+      _withAuth(supabaseConfig,
+          (r, uid) => _fundamentalsWatchlistAddHandler(r, uid, fundamentalsWatchlist)),
+    )
+    ..post(
+      '/api/fundamentals-watchlist/remove',
+      _withAuth(supabaseConfig,
+          (r, uid) => _fundamentalsWatchlistRemoveHandler(r, uid, fundamentalsWatchlist)),
     )
     ..get(
       '/api/technical-scores',

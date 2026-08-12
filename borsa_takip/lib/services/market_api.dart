@@ -265,13 +265,14 @@ class MarketApi {
     return BacktestResult.fromJson(resp);
   }
 
-  /// Temel Analiz sekmesi (bkz. models/fundamentals.dart). Teknik sekmesiyle
-  /// aynı izleme listesini (`TechnicalWatchlistStore`) paylaşır — ayrı bir
-  /// watchlist endpoint'i yok, bkz. getTechnicalWatchlist/
-  /// addToTechnicalWatchlist/removeFromTechnicalWatchlist yukarıda. Dördü de
-  /// `/api/technical` gibi auth gerektirmez; backend'de Supabase'de 24 saat
-  /// önbelleklenir (bkz. proxy_server/lib/fundamentals_cache.dart), bu
-  /// yüzden ilk istek dışında hızlıdır.
+  /// Temel Analiz sekmesi (bkz. models/fundamentals.dart). Kendi bağımsız
+  /// izleme listesi vardır (`FundamentalsWatchlistStore` — bkz.
+  /// getFundamentalsWatchlist/addToFundamentalsWatchlist/
+  /// removeFromFundamentalsWatchlist aşağıda); önceden Teknik sekmesiyle
+  /// aynı listeyi paylaşıyordu, artık ayrı. Bu dördü `/api/technical` gibi
+  /// auth gerektirmez; backend'de Supabase'de 24 saat önbelleklenir (bkz.
+  /// proxy_server/lib/fundamentals_cache.dart), bu yüzden ilk istek dışında
+  /// hızlıdır.
   Future<StockOverview> getFundamentalOverview(String symbol) async {
     final uri = Uri.parse('$_baseUrl/api/fundamentals/overview')
         .replace(queryParameters: {'symbol': symbol});
@@ -298,6 +299,34 @@ class MarketApi {
         .replace(queryParameters: {'symbol': symbol});
     final resp = await _get(uri);
     return ProTipsResult.fromJson(resp);
+  }
+
+  Future<List<String>> getFundamentalsWatchlist() async {
+    final resp = await _get(Uri.parse('$_baseUrl/api/fundamentals-watchlist'));
+    return (resp['symbols'] as List).cast<String>();
+  }
+
+  Future<({String symbol, bool added})> addToFundamentalsWatchlist(String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/fundamentals-watchlist/add'),
+      {'symbol': symbol},
+    );
+    return (
+      symbol: resp['symbol'] as String,
+      added: resp['added'] as bool? ?? false,
+    );
+  }
+
+  Future<({String symbol, bool removed})> removeFromFundamentalsWatchlist(
+      String symbol) async {
+    final resp = await _post(
+      Uri.parse('$_baseUrl/api/fundamentals-watchlist/remove'),
+      {'symbol': symbol},
+    );
+    return (
+      symbol: resp['symbol'] as String,
+      removed: resp['removed'] as bool? ?? false,
+    );
   }
 
   /// Portföy sekmesi: pozisyonlar + canlı fiyat/TL karşılığıyla hesaplanmış

@@ -147,14 +147,15 @@ class FundamentalsCache {
   // tamamen senkronken bu taramanın tamamı saniyeler sürer.
   static const _syncDelay = Duration(seconds: 4);
 
-  /// Teknik/Temel Analiz'in paylaştığı izleme listesindeki (bkz.
-  /// [TechnicalWatchlistStore]) tüm kullanıcıların distinct sembollerini
-  /// gezip [ensureFresh]'i tetikler — amaç, bir kullanıcı Temel Analiz'i
-  /// açtığında sembolün büyük ihtimalle ZATEN senkronlanmış olması, yani o
-  /// anki kullanıcı isteğinin hiç canlı Yahoo çağrısı tetiklememesi (429
-  /// riski kullanıcı isteğinden tamamen ayrılır). `main()`'de açılışta bir
-  /// kez + periyodik çağrılır (bkz. bin/server.dart).
-  Future<void> syncWatchlistedSymbols(TechnicalWatchlistStore watchlist) async {
+  /// Temel Analiz'in KENDİ izleme listesindeki (bkz.
+  /// [FundamentalsWatchlistStore] — Teknik sekmesinden bağımsız) tüm
+  /// kullanıcıların distinct sembollerini gezip [ensureFresh]'i tetikler —
+  /// amaç, bir kullanıcı Temel Analiz'i açtığında sembolün büyük ihtimalle
+  /// ZATEN senkronlanmış olması, yani o anki kullanıcı isteğinin hiç canlı
+  /// Yahoo çağrısı tetiklememesi (429 riski kullanıcı isteğinden tamamen
+  /// ayrılır). `main()`'de açılışta bir kez + periyodik çağrılır (bkz.
+  /// bin/server.dart).
+  Future<void> syncWatchlistedSymbols(FundamentalsWatchlistStore watchlist) async {
     if (_syncing) return;
     _syncing = true;
     try {

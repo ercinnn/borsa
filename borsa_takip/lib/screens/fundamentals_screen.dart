@@ -14,10 +14,9 @@ import '../widgets/symbol_search_field.dart';
 /// Z-Score ve kural bazlı ProTips özetleri (bkz. proxy_server/lib/
 /// fundamental_analysis.dart). Hesaplama tamamen proxy_server'da yapılır ve
 /// Supabase'de 24 saat önbelleklenir (bkz. fundamentals_cache.dart) — bu
-/// ekran sadece sonucu gösterir. Teknik sekmesiyle AYNI izleme listesini
-/// (`TechnicalWatchlistStore`) paylaşır — kendi ayrı bir listesi yok,
-/// bilinçli bir tasarım kararı (aynı sembol seti için hem teknik hem
-/// fundamental bakış açısı).
+/// ekran sadece sonucu gösterir. Kendi bağımsız izleme listesi vardır
+/// (`FundamentalsWatchlistStore`) — Teknik sekmesinden ayrı, Temettü
+/// sekmesindeki `DividendWatchlistStore` ile aynı desen.
 class FundamentalsScreen extends StatefulWidget {
   const FundamentalsScreen({super.key});
 
@@ -50,7 +49,7 @@ class _FundamentalsScreenState extends State<FundamentalsScreen> {
   Future<void> _loadWatchlist() async {
     setState(() => _loadingWatchlist = true);
     try {
-      final list = await _api.getTechnicalWatchlist();
+      final list = await _api.getFundamentalsWatchlist();
       if (!mounted) return;
       setState(() {
         _watchlist = list;
@@ -70,7 +69,7 @@ class _FundamentalsScreenState extends State<FundamentalsScreen> {
 
   Future<void> _addSymbol(MarketSymbol symbol) async {
     try {
-      final result = await _api.addToTechnicalWatchlist(symbol.symbol);
+      final result = await _api.addToFundamentalsWatchlist(symbol.symbol);
       if (!mounted) return;
       if (result.added && !_watchlist.contains(result.symbol)) {
         setState(() => _watchlist = [..._watchlist, result.symbol]..sort());
@@ -84,7 +83,7 @@ class _FundamentalsScreenState extends State<FundamentalsScreen> {
 
   Future<void> _removeSymbol(String symbol) async {
     try {
-      final result = await _api.removeFromTechnicalWatchlist(symbol);
+      final result = await _api.removeFromFundamentalsWatchlist(symbol);
       if (!mounted) return;
       if (result.removed) {
         setState(() {
@@ -149,8 +148,7 @@ class _FundamentalsScreenState extends State<FundamentalsScreen> {
           const SizedBox(height: 4),
           Text(
             'DCF ile basitleştirilmiş Adil Değer, Piotroski F-Score ve Altman '
-            'Z-Score — yatırım tavsiyesi değildir. Teknik sekmesiyle aynı '
-            'izleme listesini kullanır.',
+            'Z-Score — yatırım tavsiyesi değildir.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),

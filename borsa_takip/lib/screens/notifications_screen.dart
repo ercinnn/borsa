@@ -25,7 +25,7 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _api = MarketApi();
 
   List<String> _watchlist = [];
