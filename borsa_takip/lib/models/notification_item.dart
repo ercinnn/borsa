@@ -3,8 +3,8 @@ class NotificationItem {
   final String symbol;
   final double price;
   final String currency;
-  final String date;
-  final String createdAt;
+  final DateTime date;
+  final DateTime createdAt;
   final String message;
 
   const NotificationItem({
@@ -23,8 +23,8 @@ class NotificationItem {
       symbol: json['symbol'] as String,
       price: (json['price'] as num).toDouble(),
       currency: json['currency'] as String? ?? '',
-      date: json['date'] as String,
-      createdAt: json['createdAt'] as String,
+      date: DateTime.parse(json['date'] as String),
+      createdAt: DateTime.parse(json['createdAt'] as String),
       message: json['message'] as String,
     );
   }

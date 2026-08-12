@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -8,7 +9,6 @@ import 'screens/backtest_screen.dart';
 import 'screens/comparison_screen.dart';
 import 'screens/dividend_screen.dart';
 import 'screens/favorites_screen.dart';
-import 'screens/fundamentals_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/notifications_screen.dart';
@@ -36,6 +36,20 @@ class BorsaTakipApp extends StatelessWidget {
       title: 'Borsa Takip',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
+      // Uygulama zaten baştan sona Türkçe; `showDateRangePicker` gibi
+      // Flutter'ın kendi Material diyalogları bu olmadan varsayılan en_US
+      // yereline düşüp takvimi ay/gün sırası GG/AA/YYYY ile uyuşmayan bir
+      // biçimde açıyordu (bkz. home_screen.dart/tracking_screen.dart/
+      // backtest_screen.dart/comparison_screen.dart'taki tarih aralığı
+      // seçiciler) — sabit `Locale('tr')` cihaz diline bakılmaksızın bunu
+      // düzeltir.
+      locale: const Locale('tr'),
+      supportedLocales: const [Locale('tr')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: const AuthGate(),
     );
   }
@@ -420,8 +434,6 @@ class _RootShellState extends State<RootShell> {
         return const DividendScreen();
       case 'backtest':
         return const BacktestScreen();
-      case 'fundamentals':
-        return const FundamentalsScreen();
       case 'settings':
         return SettingsScreen(hiddenTabs: _hiddenTabs, onSetHidden: _setTabHidden);
       default:

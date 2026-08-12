@@ -11,7 +11,7 @@ class TabNavItem {
 }
 
 /// `NavigationBar`'ın yerine geçer: o widget sekme sayısı arttıkça
-/// (Grafik'ten Temel Analiz'e, artı Ayarlar) her öğeyi ekran genişliğine
+/// (Grafik'ten Backtest'e, artı Ayarlar) her öğeyi ekran genişliğine
 /// sıkıştırıp etiketleri iç içe geçirdiğinden, burada her öğeye sabit bir
 /// genişlik veriliyor ve toplam genişlik ekrana sığmadığında satır
 /// `SingleChildScrollView` ile yatay kaydırılabilir hale geliyor; sığdığı

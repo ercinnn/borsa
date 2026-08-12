@@ -54,12 +54,6 @@ const List<RootTab> toggleableRootTabs = [
     title: 'Backtest',
     icon: Icons.history_toggle_off,
   ),
-  RootTab(
-    key: 'fundamentals',
-    navLabel: 'Temel Analiz',
-    title: 'Temel Analiz',
-    icon: Icons.balance,
-  ),
 ];
 
 const settingsRootTab =

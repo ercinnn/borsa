@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/notification_item.dart';
 import '../models/symbol.dart';
@@ -519,6 +520,9 @@ class _NotificationTile extends StatelessWidget {
   // mesaj şablonu.
   bool get _isScoreChange => item.message.contains('teknik puan kademesi değişti');
 
+  static final _dateFormat = DateFormat('dd.MM.yyyy');
+  static final _dateTimeFormat = DateFormat('dd.MM.yyyy HH:mm');
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -531,8 +535,11 @@ class _NotificationTile extends StatelessWidget {
             color: _isScoreChange ? AppColors.cyan500 : AppColors.rose500,
           ),
           title: Text(item.message, style: const TextStyle(color: AppColors.slate100)),
-          subtitle: Text('${item.date} · ${item.createdAt}',
-              style: const TextStyle(color: AppColors.slate400)),
+          subtitle: Text(
+            '${_dateFormat.format(item.date.toLocal())} · '
+            '${_dateTimeFormat.format(item.createdAt.toLocal())}',
+            style: const TextStyle(color: AppColors.slate400),
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

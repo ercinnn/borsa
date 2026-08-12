@@ -118,7 +118,7 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   calculation below.
 - `store.dart` — `WatchlistStore`, `NotificationStore`, `FavoritesStore`,
   `TrackedSymbolStore`, `TechnicalWatchlistStore`, `DividendWatchlistStore`,
-  `FundamentalsWatchlistStore`, all persisted in a Supabase Postgres project via
+  `TabPreferencesStore`, all persisted in a Supabase Postgres project via
   `supabase_client.dart` (a minimal PostgREST wrapper, not the official
   SDK). Multi-tenant: every method takes a `userId` and queries Supabase
   filtered to that user (no in-memory cache — a single-user leftover from
@@ -143,8 +143,7 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `FavoritesStore` again (own `technical_watchlist` table, no seeding, no
   notification side-effects) — it's just which symbols the Teknik tab
   currently analyzes; unrelated to `WatchlistStore`/`FavoritesStore`.
-  `TechnicalWatchlistStore.allRows()` (mirrors `WatchlistStore.allRows()`)
-  returns every user's `(user_id, symbol)` pairs. `PortfolioStore` backs
+  `PortfolioStore` backs
   the Portföy tab: one row per `(user_id, symbol)`
   (unique index, upserted via `resolution=merge-duplicates` — same pattern
   as `TrackedSymbolStore.setFor`), storing only `quantity`/`cost_basis`.
@@ -155,31 +154,23 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   again (own `dividend_watchlist` table, no seeding, no notification
   side-effects) — it's just which symbols the Temettü tab shows; unrelated
   to `WatchlistStore`/`FavoritesStore`/`PortfolioStore`.
-  `FundamentalsWatchlistStore` is the same shape again (own
-  `fundamentals_watchlist` table, own `allRows()`, no seeding, no
-  notification side-effects) — it's just which symbols the Temel Analiz
-  tab shows. It used to reuse `TechnicalWatchlistStore` directly (Teknik
-  and Temel Analiz shared one list); the two were split apart into
-  independent stores per a later request, with a one-time backfill (see
-  `supabase_schema_fundamentals_watchlist.sql`) copying each user's
-  existing `technical_watchlist` rows into the new table so no one's
-  Temel Analiz view went empty on the switch.
   Table schema: `proxy_server/supabase_schema.sql` +
   `supabase_schema_auth.sql` + `supabase_schema_favorites.sql` +
   `supabase_schema_technical.sql` + `supabase_schema_portfolio.sql` +
-  `supabase_schema_dividends.sql` + `supabase_schema_fundamentals.sql` +
-  `supabase_schema_fundamentals_watchlist.sql` +
+  `supabase_schema_dividends.sql` +
   `supabase_schema_tab_preferences.sql` (run once each, in order,
   in the Supabase SQL Editor — the second adds
   `user_id` and RLS to the base tables, the third adds the `favorites` and
   `tracked_symbol` tables, the fourth adds `technical_watchlist`, the fifth
-  adds `portfolio_holdings`, the sixth adds `dividend_watchlist`, the
-  seventh adds `stocks`/`financial_statements`/`stock_scores` — see
-  `fundamentals_cache.dart` below for why that last one's RLS pattern is
-  the inverse of every table before it — the eighth adds
-  `fundamentals_watchlist` plus the one-time `technical_watchlist` →
-  `fundamentals_watchlist` backfill mentioned above, and the ninth adds
-  `tab_preferences`, the `TabPreferencesStore` table above). Requires `SUPABASE_URL` and
+  adds `portfolio_holdings`, the sixth adds `dividend_watchlist`, and the
+  seventh adds `tab_preferences`, the `TabPreferencesStore` table above).
+  `supabase_schema_fundamentals.sql`/`supabase_schema_fundamentals_watchlist
+  .sql` still exist on disk but are **obsolete** — they backed the removed
+  Temel Analiz tab (see "Removed: Temel Analiz tab" below) and a fresh
+  setup no longer needs to run them; the `stocks`/`financial_statements`/
+  `stock_scores`/`fundamentals_watchlist` tables they created can be
+  dropped manually in Supabase if reclaiming the space matters, nothing in
+  the app reads them anymore. Requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_KEY` env vars (see `proxy_server/.env.example`; locally
   read from a gitignored `proxy_server/.env` via `lib/env.dart`, in
   production set directly in Render). One-off local→Supabase data
@@ -330,115 +321,6 @@ Single-file router (`bin/server.dart`) wired to four `lib/` modules:
   `_technicalHandler`'s 500-day fetch) through the chosen end date, then
   hands the whole set to `runBacktest`, which only starts trading once it
   reaches the user's actual start date.
-- `yahoo_fundamentals.dart` — fetches company/financial-statement data for
-  the Temel Analiz tab. **Requires a cookie+crumb handshake** (`GET
-  fc.yahoo.com` for a cookie → `GET query2.finance.yahoo.com/v1/test/
-  getcrumb` with that cookie for a crumb, cached ~1h, refreshed once on a
-  401) — discovered live during implementation: Yahoo's `quoteSummary` and
-  `fundamentals-timeseries` endpoints reject the bare-`User-Agent` requests
-  every other `yahoo_*` fetch in this codebase uses (`401 Invalid Crumb`).
-  `_ensureCrumb()` dedups concurrent callers via a module-level
-  `Future<void>? _inFlightCrumbFetch` — every request that arrives while a
-  handshake is already running awaits that same `Future` instead of
-  starting its own (see `fundamentals_cache.dart` below for why this
-  matters: the frontend fires 4 parallel requests per symbol view, and
-  without this a single page open could hit Yahoo's crumb endpoint 4x
-  concurrently). `_retryDelays` is deliberately short (two steps, ~11s
-  total) — a longer budget was tried and reverted after live testing
-  showed retries compounding across this file's multiple sequential Yahoo
-  calls (cookie, crumb, data) *and* across `fetchStockOverview`+
-  `fetchFinancialHistory` in one `refresh()`, pushing some requests past
-  90s; real reliability now comes from the dedup here plus the
-  stale-fallback and background pre-sync in `fundamentals_cache.dart`, not
-  from a long retry budget.
-  `fetchStockOverview()` hits `quoteSummary` (`assetProfile`/`price`/
-  `summaryDetail`/`financialData`/`defaultKeyStatistics` modules) for a
-  single-period snapshot (sector, country, market cap, PE/PB, dividend
-  yield, current FCF/ROA/current-ratio/debt-to-equity).
-  `fetchFinancialHistory()` hits the **modern** `fundamentals-timeseries`
-  endpoint (NOT `quoteSummary`'s `balanceSheetHistory`/
-  `cashflowStatementHistory` modules — those return almost no fields
-  anymore, verified live; the real multi-year data lives at
-  `/ws/fundamentals-timeseries/v1/finance/timeseries/{symbol}?type=
-  annualX,annualY,...`) for ~4 years (not 5 — Yahoo's practical limit) of
-  13 named metrics (revenue, net income, FCF, operating cash flow, capex,
-  assets, liabilities, equity, current assets/liabilities, retained
-  earnings, gross profit, EBIT). **Banks/financial-sector companies don't
-  report gross profit/EBIT/current-assets/current-liabilities** (verified
-  against `AKBNK.IS` — different balance sheet structure, not a Yahoo gap),
-  so those four come back `null` for that sector; every calculator downstream
-  is null-safe about it rather than crashing. Both fetchers have their own
-  24h cache (fundamentals move quarterly at most).
-- `fundamental_analysis.dart` — pure computation (no network calls, same
-  "saf Dart, dış kütüphane yok" style as `technical_analysis.dart`):
-  `computeFairValueDCF()` (**deliberately simplified** — flat discount rate
-  by currency, 10% for USD/30% for TRY given Turkey's structurally high
-  nominal-rate environment, rather than a real per-company WACC; growth rate
-  from historical FCF trend, clamped to [-15%, 20%]; 5-year projection +
-  terminal value — this is *not* investment-grade valuation, and routinely
-  disagrees hugely with market price for mature large caps since it ignores
-  everything the market prices in beyond 5 years, which is expected
-  behavior, not a bug), `computePiotroskiFScore()` (8 of the classic 9
-  criteria — "no new shares issued" is dropped since Yahoo doesn't expose a
-  historical share-count series here; score is normalized against however
-  many criteria are actually computable for that symbol, e.g. `3/6` for a
-  bank, not always `x/9`), `computeAltmanZScore()` (classic 5-ratio formula
-  — **returns `null` with an explanatory error for banks/financials**, since
-  it needs working capital and EBIT, which those companies don't report),
-  and `generateProTips()` (same rule-based/no-LLM style as
-  `technical_screen.dart`'s `_generateCommentary()`, but sourced from
-  fundamentals instead of price action).
-- `fundamentals_cache.dart` — `FundamentalsCache` is the DB-backed
-  counterpart to `TechnicalScoreCache`'s in-memory one: `ensureFresh()`
-  checks the `stock_scores` table's `computed_at` (not `stocks.updated_at`
-  — `scores` is the last of the three tables `refresh()` writes, so its
-  timestamp is the only one that reflects "the full pipeline actually
-  completed"; a partial failure between `stocks` and `stock_scores` would
-  make an `updated_at`-based check wrongly call itself fresh forever) and
-  only calls Yahoo (via the fetchers above) + recomputes (via the
-  calculators above) + upserts all three tables if missing or older than
-  24h; otherwise the GET handlers just read straight from Supabase.
-  Storing this in Postgres rather than an in-memory map (unlike
-  `TechnicalScoreCache`) matters specifically here because Render's free
-  tier wipes in-memory state on every cold start — this cache survives
-  that. `refresh()` dedups concurrent callers per-symbol via a
-  `Map<String, Future<void>>` (`_inFlightRefreshes`, same pattern as
-  `yahoo_fundamentals.dart`'s crumb dedup above — needed because the
-  frontend's 4 parallel per-symbol requests would otherwise each trigger
-  their own full Yahoo fetch+recompute+upsert). Each Yahoo call inside
-  `refresh()` is wrapped in a 20s `_yahooFetchTimeout`; if Yahoo still
-  fails (429, timeout, or otherwise) and a previously-synced row already
-  exists for that symbol, `refresh()` silently falls back to leaving the
-  stale row untouched instead of throwing (same "fall back to last known
-  result" pattern `coingecko_client.dart` already uses) — the GET handlers
-  below surface this as `stale: true` in the JSON rather than an error
-  page. Only a symbol's *first-ever* view (no prior row to fall back to)
-  still surfaces a hard error. `syncWatchlistedSymbols()` is a background
-  job (registered in `main()` below, same trigger pattern as
-  `TechnicalScoreCache`'s refresh) that walks every distinct symbol across
-  all users' `FundamentalsWatchlistStore` rows and calls `ensureFresh()` on
-  each — deliberately sequential with a 4s pause *after each symbol that
-  actually hit Yahoo* (already-fresh symbols are skipped instantly, no
-  wait), unlike `MonthlyLowChecker`'s 4-wide-parallel-batches-every-300ms:
-  the goal here isn't throughput, it's keeping load on Yahoo's rate-limit-
-  sensitive crumb endpoint low and spread out, so that by the time a user
-  actually opens Temel Analiz for a watchlisted symbol it's typically
-  already synced and their request never touches Yahoo at all.
-  `StockStore`/`FinancialStatementStore`/`StockScoreStore` (bkz.
-  `store.dart`) back the three tables and are the only Store classes in this
-  codebase that **don't** take a `userId` — `stocks`/`financial_statements`/
-  `stock_scores` are public market data, not per-user state, so their RLS
-  (bkz. `supabase_schema_fundamentals.sql`) is the inverse of every other
-  table: `anon`+`authenticated` get an open `SELECT ... USING (true))`
-  policy, no insert/update/delete policy at all (writes only via this
-  proxy's `service_role` key, which bypasses RLS regardless).
-  `financial_statements.data` is one flat JSONB blob per (symbol, fiscal
-  year) matching `FinancialYear.toJson()` — deliberately *not* three separate
-  balance-sheet/income-statement/cash-flow JSONB columns, because Yahoo's
-  actual data here is a flat set of named metrics, not three structured
-  statement objects; inventing that structure would misrepresent what's
-  actually stored.
-
 `GET /health` — plain `200 "ok"`, no auth, no dependencies. Exists solely
 as a target for Render's health check; `/api/*` routes are the wrong choice
 since the watchlist/notifications ones now require auth (see below) and
@@ -480,32 +362,6 @@ trading only happens inside this range, data before it is fetched purely
 as lookback/warm-up), `buyThreshold`/`sellThreshold` (default 60/40, must
 satisfy `buyThreshold > sellThreshold`), `initialCapital` (default 10000)
 — public, returns a `BacktestResult`, see `backtest.dart` above),
-`fundamentals/overview`/`fundamentals/fair-value`/`fundamentals/
-health-score`/`fundamentals/protips` (GET, params: `symbol` — public, each
-reads straight from the `stocks`/`stock_scores` tables after
-`FundamentalsCache.ensureFresh()` — see `fundamentals_cache.dart` above;
-`fair-value` and `health-score` both include an `error` string field
-(`error`/`altmanError`) that's non-null instead of the numeric fields when
-that particular calculation isn't available for the symbol, e.g. bank
-stocks — the frontend shows that message rather than a bare `null`). All
-four are wrapped by `_withFreshFundamentals()` in `bin/server.dart`, which
-adds a 25s handler-level timeout around `ensureFresh()` as a defense-in-
-depth ceiling on top of `fundamentals_cache.dart`'s own per-call timeouts
-— on timeout it falls through to whatever's already in the DB (fresh or
-stale) rather than hanging the request. Each response also includes a
-`stale` boolean (`FundamentalsCache.isFresh()` against `updated_at` for
-`overview`, `computed_at` for the other three) so the frontend can show a
-"veriler güncellenemedi, en son bilinen veriler gösteriliyor" banner
-instead of silently serving old numbers as if they were current,
-`fundamentals-watchlist` (GET/add/remove, same shape as `favorites`/
-`technical-watchlist`/`dividend-watchlist` — which symbols the Temel
-Analiz tab shows; independent of `technical-watchlist` despite the two
-looking related, see `FundamentalsWatchlistStore` above),
-`admin/sync-stock/{symbol}` (POST, **not** Supabase-authenticated — guarded
-by an `X-Admin-Secret` header checked against the `ADMIN_SYNC_SECRET` env
-var; endpoint is fully disabled (503) if that var isn't set, so there's no
-default-open admin route; calls `FundamentalsCache.refresh()` directly,
-skipping the 24h freshness check),
 `tab-preferences` (GET returns `{hiddenTabs: [...]}`, POST takes
 `{hiddenTabs: [...]}` and upserts it wholesale — no add/remove pair like
 the watchlist-shaped endpoints, since the frontend always has the full set
@@ -515,11 +371,10 @@ in hand already; backs the Ayarlar tab, see `TabPreferencesStore` above),
 since a large watchlist can take minutes; guarded by a module-level
 `_checkInProgress` flag against overlapping runs). All
 `watchlist*`/`favorites*`/`tracked`/`technical-watchlist*`/`portfolio*`/
-`dividend-watchlist*`/`fundamentals-watchlist*`/`tab-preferences`/
+`dividend-watchlist*`/`tab-preferences`/
 `notifications*` endpoints require `Authorization:
 Bearer <token>` (see Auth above); `search`/`candles`/`technical`/
-`dividends`/`backtest`/`fundamentals*`/`health` don't (`admin/sync-stock`
-has its own separate `X-Admin-Secret` gate, not Supabase auth).
+`dividends`/`backtest`/`health` don't.
 
 `main()` also runs `checker.checkAll()` once at startup and then on a
 `Timer.periodic(Duration(hours: 24))` — this only fires while the process
@@ -530,9 +385,9 @@ stays alive, there's no OS-level scheduler.
 `main.dart` → `AuthGate` (listens to `Supabase.instance.client.auth
 .onAuthStateChange`) shows `LoginScreen` (email/password + Google OAuth via
 `supabase_flutter`) when signed out, else `RootShell`. `RootShell` holds an
-`IndexedStack` of eleven tab screens behind a bottom `ScrollableBottomNav`
+`IndexedStack` of ten tab screens behind a bottom `ScrollableBottomNav`
 (`widgets/scrollable_bottom_nav.dart` — a custom nav bar, not the built-in
-Material `NavigationBar`: with eleven possible tabs the built-in widget
+Material `NavigationBar`: with this many possible tabs the built-in widget
 squeezed every label to fit the screen width and wrapped/overlapped text,
 so this one gives each item a fixed width and only switches to a
 horizontally-scrolling `SingleChildScrollView` once the visible items no
@@ -606,29 +461,8 @@ the same window, `widgets/backtest_chart.dart` (a two-series adaptation of
 cyan, buy-and-hold in muted slate as the "reference" line) plotting both as
 % return over time, and a trade-by-trade table; see `backtest.dart` in the
 backend section for the simulation itself and its simplifying assumptions),
-and `FundamentalsScreen` (Temel Analiz tab: DCF Fair Value, Piotroski
-F-Score, Altman Z-Score, ProTips for whatever symbol is selected — has its
-own independent `FundamentalsWatchlistStore`-backed watchlist, same
-pattern as every other tab (Teknik/Temettü/Favoriler each own their own
-list); it used to reuse `TechnicalWatchlistStore` directly (a symbol added
-in Teknik showed up here too and vice versa) but that sharing was split
-apart per a later request — see `FundamentalsWatchlistStore` in the
-backend section above for the one-time backfill that preserved existing
-users' Temel Analiz symbols across the switch; when a calculation isn't
-available for a symbol — the common case being Altman Z-Score and two Piotroski
-criteria for banks/financial-sector stocks — the card shows the backend's
-`error` string instead of a bare blank value; see `fundamental_analysis.dart`
-and `fundamentals_cache.dart` in the backend section for the computation,
-simplifying assumptions, and DB-backed caching. All four models
-(`StockOverview`/`FairValueResult`/`HealthScoreResult`/`ProTipsResult` in
-`models/fundamentals.dart`) carry the backend's `stale` boolean; if any of
-them is `true` for the currently-selected symbol,
-`_FundamentalsResultView` shows a warning banner above the rest of the
-page ("Veriler şu an güncellenemedi ... en son bilinen veriler
-gösteriliyor") instead of silently presenting old numbers as current — see
-the `stale`-fallback behavior in `fundamentals_cache.dart` above for when
-this triggers), and `SettingsScreen` (Ayarlar tab: lets the user hide any
-of the other ten tabs from the bottom nav via a `SwitchListTile` per tab —
+and `SettingsScreen` (Ayarlar tab: lets the user hide any
+of the other nine tabs from the bottom nav via a `SwitchListTile` per tab —
 `models/root_tabs.dart`'s `toggleableRootTabs` is the single ordered list
 of tab metadata (key/label/title/icon) shared by this screen, `RootShell`'s
 `IndexedStack` ordering, and its `ScrollableBottomNav` items, so a tab's
@@ -675,6 +509,19 @@ whatever symbol was last persisted via `/api/tracked` on its own `initState`
 `services/supabase_config.dart` holds the (non-secret) Supabase URL +
 anon/publishable key, hardcoded as `String.fromEnvironment` defaults — same
 pattern as `API_BASE_URL`.
+
+`main.dart`'s `MaterialApp` sets `locale: const Locale('tr')` +
+`flutter_localizations`'s three `Global*Localizations.delegate`s. Without
+this, Flutter's own Material dialogs (`showDateRangePicker`, used by
+`HomeScreen`/`TrackingScreen`/`BacktestScreen`/`ComparisonScreen`) fell
+back to `en_US` and rendered their calendar in month/day order — every
+`DateFormat` the app itself uses for display text was already
+`dd.MM.yyyy`/`dd.MM.yyyy HH:mm`, only the picker's own built-in UI was
+wrong, so this was a one-line root-cause fix rather than a per-screen one.
+Pulling in `flutter_localizations` (an SDK package, not pub.dev) forced
+`intl` from `^0.19.0` to `^0.20.2` in `pubspec.yaml` (SDK version pinning —
+`flutter_localizations` depends on a specific `intl` version and both
+packages have to agree).
 
 `services/market_api.dart` is the only HTTP boundary — every screen goes
 through it, never calls `http` directly. Every request attaches
@@ -733,11 +580,7 @@ iterating `ChartInterval.values`.
   "Demo" key (from coingecko.com/en/developers/dashboard) raises the
   crypto300 preset's rate limit well above the shared-IP anonymous tier;
   without it the proxy still works, just retries more and is more likely to
-  fall back to the static crypto list under load. `ADMIN_SYNC_SECRET` is
-  also declared and also optional, but with the opposite default: leaving
-  it unset doesn't degrade a feature, it **disables** `POST /api/admin/
-  sync-stock/{symbol}` entirely (503) — see `fundamentals_cache.dart` in
-  Architecture above.
+  fall back to the static crypto list under load.
   Free tier spins down after ~15 min idle; first request after that takes
   30–50s.
 - **Auto-deploy is unreliable in practice**: Render's service has
@@ -760,48 +603,31 @@ iterating `ChartInterval.values`.
 
 - BIST200/US-popular-200 preset lists are hand-curated snapshots, not a
   live index feed (Yahoo's actual "most active" screener needs
-  cookie/crumb auth this specific preset-list code path doesn't implement
-  — `yahoo_fundamentals.dart` *does* implement that handshake now, just for
-  a different endpoint, see Architecture above) — expect occasional stale
-  or wrong tickers; the checker just skips symbols that fail to fetch.
-- The Temel Analiz tab's cookie+crumb handshake (`yahoo_fundamentals.dart`)
-  is unofficial/reverse-engineered — Yahoo doesn't document or guarantee
-  this endpoint or auth flow, unlike the plain chart/search endpoints the
-  rest of this codebase uses, which have been stable for years. If Yahoo
-  changes it, `fetchStockOverview`/`fetchFinancialHistory` will start
-  throwing `YahooException`s (surfaced as 404s to the frontend) until the
-  handshake is updated — this is a meaningfully higher-risk dependency than
-  everything else in `yahoo_client.dart`. Separately (and observed live in
-  production repeatedly — first traced through with `ISBTR.IS`, then again
-  with `BJKAS.IS`): Yahoo rate-limits this handshake more aggressively from
-  Render's shared cloud IPs than from a residential dev machine — the exact
-  same "Render IP gets 429'd, my laptop doesn't" problem
-  `coingecko_client.dart` already has a comment about, confirmed live
-  (same-moment request from a dev machine got an instant 200 from
-  `getcrumb` while Render's IP exhausted its full retry budget and still
-  got 429). That's compounded by a **self-inflicted** second cause found
-  during the same investigation: `FundamentalsScreen` fires its 4
-  `overview`/`fair-value`/`health-score`/`protips` requests in parallel per
-  symbol view, and with no coordination each one independently triggered
-  its own crumb handshake — a single page open could hit Yahoo's crumb
-  endpoint 4x concurrently, worse than the external rate-limit alone.
-  Addressed with a multi-layer fix rather than a single retry tweak (a
-  first attempt that just widened the retry budget made things *worse* —
-  retries compound across this file's sequential Yahoo calls and across
-  both fetchers inside one `refresh()`, and a live test hung 90+ seconds
-  before that was caught and reverted): concurrent-request dedup at both
-  the crumb-handshake layer (`yahoo_fundamentals.dart`) and the
-  per-symbol-refresh layer (`fundamentals_cache.dart`), a short bounded
-  retry budget (~11s) plus per-call and per-handler timeouts instead of a
-  long one, a stale-data fallback so a failed live refresh serves the last
-  known good row (flagged `stale: true`) instead of erroring, and a slow
-  background pre-sync job so watchlisted symbols are typically already
-  fresh before a user ever opens Temel Analiz for them — see
-  `yahoo_fundamentals.dart` and `fundamentals_cache.dart` in the
-  Architecture section above for the specifics of each layer. A symbol's
-  very first-ever view (nothing to fall back to) can still surface a hard
-  error if Yahoo is actively rate-limiting at that moment — this is now
-  the only case that isn't fully absorbed by the fix.
+  cookie/crumb auth this preset-list code path doesn't implement) —
+  expect occasional stale or wrong tickers; the checker just skips symbols
+  that fail to fetch.
+- **Removed: Temel Analiz tab** (DCF Fair Value/Piotroski/Altman/ProTips,
+  backed by `yahoo_fundamentals.dart`/`fundamental_analysis.dart`/
+  `fundamentals_cache.dart` and the `stocks`/`financial_statements`/
+  `stock_scores`/`fundamentals_watchlist` Supabase tables). Removed rather
+  than kept-and-fixed after live testing kept surfacing "Sembol bulunamadı"
+  even for valid symbols — traced to Yahoo's undocumented `quoteSummary`
+  cookie+crumb handshake being rate-limited/blocked from Render's shared
+  cloud IP (the multi-layer mitigation described in earlier versions of
+  this file — crumb dedup, stale-fallback, background pre-sync — reduced
+  but never eliminated it, since the underlying cause is Yahoo throttling
+  the IP, not a bug in this codebase). Before removing, free/paid
+  alternative fundamentals APIs were checked for BIST (Borsa Istanbul)
+  coverage specifically, since that's the market this app cares most about
+  and most providers skip it entirely: Twelve Data has XIST fundamentals
+  but only on a paid plan; Financial Modeling Prep's free (and most paid)
+  tiers cover US-listed companies only. No free, reliable, officially
+  documented source covering both BIST and US fundamentals was found, so
+  rather than trade one flaky unofficial integration for another (or add a
+  paid dependency to a personal app), the tab was dropped. The two
+  `supabase_schema_fundamentals*.sql` files are kept on disk for history
+  but are no longer run for a fresh setup (see the `store.dart` bullet
+  above); their tables can be dropped manually in Supabase if desired.
 - `git` is not installed on the primary dev machine by default; when it is
   installed via winget mid-session, a *new* shell is needed before `git`
   resolves on PATH (the invoking shell keeps its stale PATH).

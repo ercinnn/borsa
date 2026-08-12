@@ -10,7 +10,6 @@ import 'package:shelf_router/shelf_router.dart';
 import '../lib/backtest.dart';
 import '../lib/coingecko_client.dart';
 import '../lib/env.dart';
-import '../lib/fundamentals_cache.dart';
 import '../lib/monthly_low_checker.dart';
 import '../lib/preset_lists.dart';
 import '../lib/portfolio_summary.dart';
@@ -22,7 +21,6 @@ import '../lib/yahoo_client.dart';
 
 final _httpClient = http.Client();
 final _coingeckoApiKey = env('COINGECKO_API_KEY');
-final _adminSyncSecret = env('ADMIN_SYNC_SECRET');
 
 Middleware _cors() {
   const headers = {
@@ -405,161 +403,6 @@ Future<Response> _dividendsHandler(Request request) async {
   }
 }
 
-// yahoo_fundamentals.dart'ın kendi retry/timeout katmanları olsa da (bkz. o
-// dosyanın doc yorumları), bunların iç içe ne kadar sürebileceğini kesin
-// olarak öngörmek zor — burada kullanıcıya giden HTTP yanıtı için ayrı, sert
-// bir üst sınır koyuyoruz. Süre dolarsa hata döndürmek yerine DB'de o an ne
-// varsa onunla devam ediyoruz (aşağıdaki catch, [_withFreshFundamentals]).
-const _fundamentalsRequestTimeout = Duration(seconds: 25);
-
-/// Temel Analiz uç noktalarının hepsinin ortak akışı: [cache.ensureFresh]
-/// (DB'de 24 saatten eski/eksikse Yahoo'dan çekip yeniden hesaplar) sonrası
-/// ilgili Store'dan okuyup 404/YahooException/InsufficientDataException'ı
-/// düzgün HTTP koduna çevirir.
-Future<Response> _withFreshFundamentals(
-  String symbol,
-  FundamentalsCache cache,
-  Future<Response> Function() onFresh,
-) async {
-  try {
-    await cache.ensureFresh(symbol).timeout(_fundamentalsRequestTimeout);
-    return await onFresh();
-  } on TimeoutException {
-    // Yahoo tarafı beklenenden yavaş/tıkalı kaldı — kullanıcıyı süresiz
-    // bekletmek yerine DB'de o an ne varsa (stale veri ya da hiçbir şey)
-    // onunla devam ediyoruz. Arka plandaki yenileme denemesi
-    // (FundamentalsCache._inFlightRefreshes) kesilmez, sonraki istekte
-    // tamamlanmış olabilir.
-    return await onFresh();
-  } on YahooException catch (e) {
-    return _json({'error': e.message}, status: 404);
-  } on InsufficientDataException catch (e) {
-    return _json({'error': e.message}, status: 422);
-  } catch (e) {
-    stderr.writeln('Temel analiz hatası ($symbol): $e');
-    return _json({'error': 'Temel analiz hesaplanırken bir hata oluştu.'}, status: 502);
-  }
-}
-
-Future<Response> _fundamentalsOverviewHandler(
-  Request request, FundamentalsCache cache, StockStore stocks) async {
-  final symbol = request.url.queryParameters['symbol'];
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
-  }
-  return _withFreshFundamentals(symbol, cache, () async {
-    final row = await stocks.getBySymbol(symbol);
-    if (row == null) return _json({'error': 'Sembol bulunamadı: $symbol'}, status: 404);
-    return _json({
-      'symbol': row['symbol'],
-      'companyName': row['company_name'],
-      'sector': row['sector'],
-      'country': row['country'],
-      'currency': row['currency'],
-      'lastPrice': row['last_price'],
-      'marketCap': row['market_cap'],
-      'peRatio': row['pe_ratio'],
-      'pbRatio': row['pb_ratio'],
-      'dividendYield': row['dividend_yield'],
-      'updatedAt': row['updated_at'],
-      'stale': !cache.isFresh(row['updated_at'] as String?),
-    });
-  });
-}
-
-Future<Response> _fundamentalsFairValueHandler(
-  Request request, FundamentalsCache cache, StockScoreStore scores) async {
-  final symbol = request.url.queryParameters['symbol'];
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
-  }
-  return _withFreshFundamentals(symbol, cache, () async {
-    final row = await scores.getBySymbol(symbol);
-    if (row == null) return _json({'error': 'Sembol bulunamadı: $symbol'}, status: 404);
-    return _json({
-      'symbol': row['symbol'],
-      'fairValuePerShare': row['fair_value_per_share'],
-      'upsidePct': row['fair_value_upside_pct'],
-      'error': row['fair_value_error'],
-      'assumptions': row['dcf_assumptions'],
-      'computedAt': row['computed_at'],
-      'stale': !cache.isFresh(row['computed_at'] as String?),
-    });
-  });
-}
-
-Future<Response> _fundamentalsHealthScoreHandler(
-  Request request, FundamentalsCache cache, StockScoreStore scores) async {
-  final symbol = request.url.queryParameters['symbol'];
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
-  }
-  return _withFreshFundamentals(symbol, cache, () async {
-    final row = await scores.getBySymbol(symbol);
-    if (row == null) return _json({'error': 'Sembol bulunamadı: $symbol'}, status: 404);
-    return _json({
-      'symbol': row['symbol'],
-      'altmanZScore': row['altman_z_score'],
-      'altmanZone': row['altman_zone'],
-      'altmanError': row['altman_error'],
-      'piotroskiScore': row['piotroski_score'],
-      'piotroskiMaxScore': row['piotroski_max_score'],
-      'piotroskiCriteria': row['piotroski_criteria'],
-      'computedAt': row['computed_at'],
-      'stale': !cache.isFresh(row['computed_at'] as String?),
-    });
-  });
-}
-
-Future<Response> _fundamentalsProTipsHandler(
-  Request request, FundamentalsCache cache, StockScoreStore scores) async {
-  final symbol = request.url.queryParameters['symbol'];
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol parametresi gerekli'}, status: 400);
-  }
-  return _withFreshFundamentals(symbol, cache, () async {
-    final row = await scores.getBySymbol(symbol);
-    if (row == null) return _json({'error': 'Sembol bulunamadı: $symbol'}, status: 404);
-    return _json({
-      'symbol': row['symbol'],
-      'tips': row['pro_tips'],
-      'computedAt': row['computed_at'],
-      'stale': !cache.isFresh(row['computed_at'] as String?),
-    });
-  });
-}
-
-/// Kullanıcı auth'u DEĞİL — servis-to-servis/manuel tetikleme (cron, admin
-/// panel vb.) için ayrı bir paylaşılan sır. `ADMIN_SYNC_SECRET` env var'ı
-/// ayarlanmamışsa uç nokta tamamen kapalıdır (503) — açık bırakılmış bir
-/// admin endpoint'i olmasın diye varsayılan "kapalı".
-Future<Response> _adminSyncStockHandler(Request request, FundamentalsCache cache) async {
-  final secret = _adminSyncSecret;
-  if (secret == null || secret.isEmpty) {
-    return _json({'error': 'Admin sync devre dışı (ADMIN_SYNC_SECRET ayarlanmamış)'},
-        status: 503);
-  }
-  final provided = request.headers['x-admin-secret'];
-  if (provided == null || provided != secret) {
-    return _json({'error': 'Yetkisiz'}, status: 401);
-  }
-  final symbol = request.params['symbol'];
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol gerekli'}, status: 400);
-  }
-  try {
-    await cache.refresh(symbol);
-    return _json({'symbol': symbol.trim().toUpperCase(), 'synced': true});
-  } on YahooException catch (e) {
-    return _json({'error': e.message}, status: 404);
-  } on InsufficientDataException catch (e) {
-    return _json({'error': e.message}, status: 422);
-  } catch (e) {
-    stderr.writeln('Admin sync hatası ($symbol): $e');
-    return _json({'error': 'Senkronizasyon sırasında bir hata oluştu.'}, status: 502);
-  }
-}
-
 // _technicalHandler'ın canlı puanla aynı büyüklükte bir lookback kullanması
 // gibi, backtest de simülasyon başlangıcından önce en az bu kadar takvim
 // günü geriye giderek ısınma verisi çeker (bkz. lib/backtest.dart
@@ -905,33 +748,6 @@ Future<Response> _dividendWatchlistRemoveHandler(
   return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
 }
 
-Future<Response> _fundamentalsWatchlistGetHandler(Request request, String userId,
-    FundamentalsWatchlistStore fundamentalsWatchlist) async {
-  return _json({'symbols': await fundamentalsWatchlist.symbolsFor(userId)});
-}
-
-Future<Response> _fundamentalsWatchlistAddHandler(Request request, String userId,
-    FundamentalsWatchlistStore fundamentalsWatchlist) async {
-  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
-  final symbol = body['symbol'] as String?;
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol gerekli'}, status: 400);
-  }
-  final added = await fundamentalsWatchlist.add(userId, symbol);
-  return _json({'symbol': symbol.trim().toUpperCase(), 'added': added});
-}
-
-Future<Response> _fundamentalsWatchlistRemoveHandler(Request request, String userId,
-    FundamentalsWatchlistStore fundamentalsWatchlist) async {
-  final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
-  final symbol = body['symbol'] as String?;
-  if (symbol == null || symbol.trim().isEmpty) {
-    return _json({'error': 'symbol gerekli'}, status: 400);
-  }
-  final removed = await fundamentalsWatchlist.remove(userId, symbol);
-  return _json({'symbol': symbol.trim().toUpperCase(), 'removed': removed});
-}
-
 Future<Response> _portfolioGetHandler(
     Request request, String userId, PortfolioStore portfolio) async {
   final holdings = await portfolio.holdingsFor(userId);
@@ -1037,17 +853,11 @@ void main(List<String> args) async {
   final favorites = FavoritesStore(supabaseConfig, _httpClient);
   final technicalWatchlist = TechnicalWatchlistStore(supabaseConfig, _httpClient);
   final dividendWatchlist = DividendWatchlistStore(supabaseConfig, _httpClient);
-  final fundamentalsWatchlist = FundamentalsWatchlistStore(supabaseConfig, _httpClient);
   final trackedSymbol = TrackedSymbolStore(supabaseConfig, _httpClient);
   final tabPreferences = TabPreferencesStore(supabaseConfig, _httpClient);
   final technicalScoreCache =
       TechnicalScoreCache(_httpClient, watchlist, notifications);
   final portfolio = PortfolioStore(supabaseConfig, _httpClient);
-  final stockStore = StockStore(supabaseConfig, _httpClient);
-  final financialStatementStore = FinancialStatementStore(supabaseConfig, _httpClient);
-  final stockScoreStore = StockScoreStore(supabaseConfig, _httpClient);
-  final fundamentalsCache =
-      FundamentalsCache(_httpClient, stockStore, financialStatementStore, stockScoreStore);
 
   final checker = MonthlyLowChecker(_httpClient, watchlist, notifications);
 
@@ -1075,20 +885,6 @@ void main(List<String> args) async {
   Timer.periodic(const Duration(hours: 4), (_) {
     technicalScoreCache.refreshAll().catchError((e) {
       stderr.writeln('Puan hesaplaması başarısız: $e');
-    });
-  });
-
-  // Temel Analiz için: açılışta bir kez, sonrasında 6 saatte bir arka planda
-  // ön-senkronizasyon (bkz. fundamentals_cache.dart syncWatchlistedSymbols —
-  // bilerek çok yavaş tempoda, MonthlyLowChecker/TechnicalScoreCache'in
-  // aksine amaç paralellik değil Yahoo'nun crumb endpoint'ine yayılmış yük).
-  // 24 saatlik DB cache TTL'sinden daha sık: cold start sonrası taze kalsın.
-  fundamentalsCache.syncWatchlistedSymbols(fundamentalsWatchlist).catchError((e) {
-    stderr.writeln('İlk temel analiz senkronizasyonu başarısız: $e');
-  });
-  Timer.periodic(const Duration(hours: 6), (_) {
-    fundamentalsCache.syncWatchlistedSymbols(fundamentalsWatchlist).catchError((e) {
-      stderr.writeln('Temel analiz senkronizasyonu başarısız: $e');
     });
   });
 
@@ -1143,26 +939,6 @@ void main(List<String> args) async {
     ..get('/api/dividends', _dividendsHandler)
     ..get('/api/backtest', _backtestHandler)
     ..get(
-      '/api/fundamentals/overview',
-      (r) => _fundamentalsOverviewHandler(r, fundamentalsCache, stockStore),
-    )
-    ..get(
-      '/api/fundamentals/fair-value',
-      (r) => _fundamentalsFairValueHandler(r, fundamentalsCache, stockScoreStore),
-    )
-    ..get(
-      '/api/fundamentals/health-score',
-      (r) => _fundamentalsHealthScoreHandler(r, fundamentalsCache, stockScoreStore),
-    )
-    ..get(
-      '/api/fundamentals/protips',
-      (r) => _fundamentalsProTipsHandler(r, fundamentalsCache, stockScoreStore),
-    )
-    ..post(
-      '/api/admin/sync-stock/<symbol>',
-      (r) => _adminSyncStockHandler(r, fundamentalsCache),
-    )
-    ..get(
       '/api/dividend-watchlist',
       _withAuth(supabaseConfig,
           (r, uid) => _dividendWatchlistGetHandler(r, uid, dividendWatchlist)),
@@ -1176,21 +952,6 @@ void main(List<String> args) async {
       '/api/dividend-watchlist/remove',
       _withAuth(supabaseConfig,
           (r, uid) => _dividendWatchlistRemoveHandler(r, uid, dividendWatchlist)),
-    )
-    ..get(
-      '/api/fundamentals-watchlist',
-      _withAuth(supabaseConfig,
-          (r, uid) => _fundamentalsWatchlistGetHandler(r, uid, fundamentalsWatchlist)),
-    )
-    ..post(
-      '/api/fundamentals-watchlist/add',
-      _withAuth(supabaseConfig,
-          (r, uid) => _fundamentalsWatchlistAddHandler(r, uid, fundamentalsWatchlist)),
-    )
-    ..post(
-      '/api/fundamentals-watchlist/remove',
-      _withAuth(supabaseConfig,
-          (r, uid) => _fundamentalsWatchlistRemoveHandler(r, uid, fundamentalsWatchlist)),
     )
     ..get(
       '/api/technical-scores',
