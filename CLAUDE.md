@@ -520,14 +520,29 @@ stays alive, there's no OS-level scheduler.
 `IndexedStack` of ten tab screens behind a bottom `NavigationBar`:
 `HomeScreen` (chart/table), `NotificationsScreen` (watchlist management +
 notification feed — its watchlist-management area itself has two sub-tabs,
-"İzleme Listesi" (the existing add/remove/preset UI) and "Puan Sıralaması"
+"İzleme Listesi" (the existing add/remove/preset UI — the BIST/ABD/Kripto
+category `TabBar` + symbol-chip `Wrap` below it can be collapsed with a
+"Gizle"/"Göster" toggle next to the "`X` sembol izleniyor" count, added
+once preset sizes grew large enough (BIST 200 + ABD 200 + Kripto 300, and
+the crypto preset is additive across repeated clicks — see
+`coingecko_client.dart` above — so a watchlist can grow past 700+ symbols)
+that the un-collapsed chip list became unwieldy; the count and the
+notification feed below stay visible either way, only the tab+chip section
+folds) and "Puan Sıralaması"
 (`widgets/score_ranking_section.dart`'s `ScoreRankingSection`, a
 self-contained `StatefulWidget` with its own `MarketApi()`: BIST/ABD/Kripto
 category filters that can be combined freely, ascending/descending sort by
 the Teknik score, and 50-symbols-per-page pagination — reads
 `/api/technical-scores`, which itself reads only from
 `TechnicalScoreCache`, see the backend section), while the notification
-feed below stays visible regardless of which sub-tab is selected),
+feed below stays visible regardless of which sub-tab is selected — both
+sub-tabs are driven by their own `TabController`, so
+`_NotificationsScreenState` needs `TickerProviderStateMixin` (plural) not
+`SingleTickerProviderStateMixin`; using the singular mixin with two
+controllers compiles fine but throws at runtime the moment the screen is
+opened ("`SingleTickerProviderStateMixin` can only be used as a
+`TickerProvider` once") — hit live and fixed in this codebase, worth
+remembering before adding a third `TabController` anywhere in this file),
 `FavoritesScreen` (search + favorite list),
 `TrackingScreen` (single-symbol chart — interval chips are
 `ChartInterval.tracking`, see the interval section above), and
