@@ -6,10 +6,21 @@ import '../models/interval.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
+import '../utils/candle_padding.dart';
+import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
 import '../widgets/favorite_symbols_bar.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/symbol_search_field.dart';
+
+// Grafik sekmesinde ChartResultSection'ı saran kart zincirinin tahmini
+// "chrome"u — sayfa padding'i (24×2) + bu GlassCard'ın kendi padding'i
+// (24×2) + CandlestickChart'ın kendi GlassCard'ı (12×2) + fiyat ekseni
+// (CandlestickChart.axisWidth) — piksel-kusursuz olması gerekmiyor, sadece
+// "bu aralık+interval yeterli mum üretecek mi" kararını verirken
+// MediaQuery genişliğinden ne kadar düşülmesi gerektiğine dair kaba bir
+// tahmin (bkz. _estimateMinCandles, utils/candle_padding.dart).
+const _chartChromeWidth = 48 + 48 + 24;
 
 class HomeScreen extends StatefulWidget {
   // Bildirimler sekmesinden bir sembole tıklanınca RootShell bu ikisini
@@ -72,8 +83,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = false;
   String? _error;
   CandleResult? _result;
+  int _paddingCandleCount = 0;
 
   int _handledRequestId = 0;
+
+  int _estimateMinCandles(BuildContext context) {
+    final available = MediaQuery.sizeOf(context).width - _chartChromeWidth;
+    return (available / CandlestickChart.maxSlotWidth).ceil().clamp(8, 60);
+  }
 
   static DateTimeRange _last12Months() {
     final now = DateTime.now();
@@ -130,21 +147,39 @@ class _HomeScreenState extends State<HomeScreen> {
       _loading = true;
       _error = null;
       _result = null;
+      _paddingCandleCount = 0;
     });
 
     try {
-      final result = await _api.candles(
+      final padded = await fetchCandlesWithMinimum(
+        api: _api,
         symbol: symbol.symbol,
         start: range.start,
         end: range.end,
         interval: _interval,
+        minCandles: _estimateMinCandles(context),
         includeIndicators: true,
       );
       if (!mounted) return;
       setState(() {
-        _result = result;
+        _result = padded.result;
+        _paddingCandleCount = padded.paddingCount;
         _loading = false;
       });
+      if (padded.result.candles.isNotEmpty) {
+        if (padded.wasPadded) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Seçilen aralıkta yeterli mum yoktu, grafik '
+                '${_dateFormat.format(padded.effectiveStart)} tarihinden '
+                'itibaren gösteriliyor.'),
+          ));
+        } else if (padded.historyLimited) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Bu sembol için daha eski veri bulunamadı, grafik '
+                'mevcut ${padded.result.candles.length} mumla gösteriliyor.'),
+          ));
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -212,6 +247,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   loading: _loading,
                   error: _error,
                   result: _result,
+                  paddingCandleCount: _paddingCandleCount,
                   leadingActions: [
                     if (_selectedSymbol != null) ...[
                       Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),

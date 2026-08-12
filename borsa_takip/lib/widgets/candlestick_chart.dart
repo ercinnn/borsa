@@ -22,8 +22,19 @@ import 'glass_card.dart';
 /// panelinin üzerine doğrudan bindirilir (ayrı bir panel değil, overlay).
 class CandlestickChart extends StatefulWidget {
   final CandleResult result;
+  // Seçilen aralıkta yeterli mum yoksa çağıran ekran (bkz.
+  // utils/candle_padding.dart) başlangıç tarihini otomatik geriye çekip
+  // yeniden veri çeker; result.candles'ın en baştaki bu kadarı kullanıcının
+  // seçmediği "otomatik eklenen" geçmiş olur ve soluk/gölgeli çizilir.
+  final int paddingCandleCount;
 
-  const CandlestickChart({super.key, required this.result});
+  // `CandlestickChart.maxSlotWidth`, çağıran ekranların "bu aralık+interval yeterli mum
+  // üretecek mi" hesabında (bkz. candle_padding.dart) da kullanabilmesi
+  // için burada public — tek doğruluk kaynağı, sihirli sayı tekrarı olmasın.
+  static const double maxSlotWidth = 46.0;
+  static const double axisWidth = 64.0;
+
+  const CandlestickChart({super.key, required this.result, this.paddingCandleCount = 0});
 
   @override
   State<CandlestickChart> createState() => _CandlestickChartState();
@@ -34,9 +45,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
   static const _indicatorHeight = 70.0;
   static const _sectionGap = 6.0;
   static const _labelHeight = 28.0;
-  static const _axisWidth = 64.0;
   static const _minSlotWidth = 1.5;
-  static const _maxSlotWidth = 46.0;
   static const _smaPeriod = 20;
   static const _emaPeriod = 50;
 
@@ -173,18 +182,18 @@ class _CandlestickChartState extends State<CandlestickChart> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   SizedBox(
-                    width: _axisWidth,
+                    width: CandlestickChart.axisWidth,
                     height: _chartHeight,
                     child: _PriceAxis(minPrice: minPrice, maxPrice: maxPrice),
                   ),
                   if (showRsi) ...[
                     const SizedBox(height: _sectionGap),
-                    const SizedBox(width: _axisWidth, height: _indicatorHeight, child: _RsiAxis()),
+                    const SizedBox(width: CandlestickChart.axisWidth, height: _indicatorHeight, child: _RsiAxis()),
                   ],
                   if (showMacd) ...[
                     const SizedBox(height: _sectionGap),
                     SizedBox(
-                      width: _axisWidth,
+                      width: CandlestickChart.axisWidth,
                       height: _indicatorHeight,
                       child: _MacdAxis(minMacd: _minMacd, maxMacd: _maxMacd),
                     ),
@@ -192,7 +201,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                   if (showVolume) ...[
                     const SizedBox(height: _sectionGap),
                     SizedBox(
-                      width: _axisWidth,
+                      width: CandlestickChart.axisWidth,
                       height: _indicatorHeight,
                       child: _VolumeAxis(maxVolume: _maxVolume),
                     ),
@@ -206,7 +215,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                     // Tüm mumları mevcut genişliğe sığdırmak için mum
                     // başına düşen genişlik ekrana göre daraltılıyor.
                     final slotWidth = (constraints.maxWidth / candles.length)
-                        .clamp(_minSlotWidth, _maxSlotWidth);
+                        .clamp(_minSlotWidth, CandlestickChart.maxSlotWidth);
                     final candleWidth = (slotWidth * 0.7).clamp(1.0, 20.0);
                     final contentWidth = slotWidth * candles.length;
                     // Dar mum aralıklarında her mumun altına etiket
@@ -246,6 +255,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                       sma: hasSma ? _sma20 : const [],
                                       ema: hasEma ? _ema50 : const [],
                                       highlightIndex: _hoverIndex,
+                                      paddingCandleCount: widget.paddingCandleCount,
                                     ),
                                     size: Size(contentWidth, _chartHeight),
                                   ),
@@ -259,6 +269,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                         candles: candles,
                                         slotWidth: slotWidth,
                                         highlightIndex: _hoverIndex,
+                                      paddingCandleCount: widget.paddingCandleCount,
                                       ),
                                       size: Size(contentWidth, _indicatorHeight),
                                     ),
@@ -276,6 +287,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                         minMacd: _minMacd,
                                         maxMacd: _maxMacd,
                                         highlightIndex: _hoverIndex,
+                                      paddingCandleCount: widget.paddingCandleCount,
                                       ),
                                       size: Size(contentWidth, _indicatorHeight),
                                     ),
@@ -292,6 +304,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                         candleWidth: candleWidth,
                                         maxVolume: _maxVolume,
                                         highlightIndex: _hoverIndex,
+                                      paddingCandleCount: widget.paddingCandleCount,
                                       ),
                                       size: Size(contentWidth, _indicatorHeight),
                                     ),
@@ -582,6 +595,25 @@ void _paintCrosshairLine(Canvas canvas, Size size, double slotWidth, int? highli
   canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
 }
 
+/// Tüm panel painter'ları için ortak: [paddingCandleCount] doluysa (bkz.
+/// CandlestickChart.paddingCandleCount doc yorumu), en baştaki o kadar
+/// mumun arkasına hafif gölgeli bir bant + sınırda ince bir ayraç çizgisi
+/// çizer — kullanıcının seçmediği, otomatik eklenen geçmişi işaretler.
+/// Diğer çizimlerden (grid, mumlar, çizgiler) ÖNCE çağrılmalı ki arka
+/// planda kalsın.
+void _paintPaddingBand(Canvas canvas, Size size, double slotWidth, int paddingCandleCount) {
+  if (paddingCandleCount <= 0) return;
+  final width = (paddingCandleCount * slotWidth).clamp(0.0, size.width);
+  canvas.drawRect(
+    Rect.fromLTWH(0, 0, width, size.height),
+    Paint()..color = AppColors.slate800.withValues(alpha: 0.35),
+  );
+  final dividerPaint = Paint()
+    ..color = AppColors.slate400.withValues(alpha: 0.6)
+    ..strokeWidth = 1;
+  canvas.drawLine(Offset(width, 0), Offset(width, size.height), dividerPaint);
+}
+
 class _CandlestickPainter extends CustomPainter {
   final List<Candle> candles;
   final double minPrice;
@@ -592,6 +624,7 @@ class _CandlestickPainter extends CustomPainter {
   final List<double?> sma;
   final List<double?> ema;
   final int? highlightIndex;
+  final int paddingCandleCount;
 
   _CandlestickPainter({
     required this.candles,
@@ -603,6 +636,7 @@ class _CandlestickPainter extends CustomPainter {
     required this.sma,
     required this.ema,
     required this.highlightIndex,
+    required this.paddingCandleCount,
   });
 
   double _priceToY(double price, double height) {
@@ -635,8 +669,26 @@ class _CandlestickPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
+  void _drawPaddingLabel(Canvas canvas, Size size) {
+    if (paddingCandleCount <= 0) return;
+    final x = (paddingCandleCount * slotWidth).clamp(0.0, size.width);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '← Otomatik eklendi',
+        style: TextStyle(fontSize: 10, color: AppColors.slate400),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    // Ayracın sağında yer yoksa (dolgu neredeyse tüm genişliği kaplıyorsa)
+    // etiket solda kalır, taşmaz.
+    final left = (x + 6 + tp.width <= size.width) ? x + 6 : (x - 6 - tp.width).clamp(0.0, size.width);
+    tp.paint(canvas, Offset(left, 4));
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
+    _paintPaddingBand(canvas, size, slotWidth, paddingCandleCount);
+
     final gridPaint = Paint()
       ..color = AppColors.slate800.withValues(alpha: 0.5)
       ..strokeWidth = 1;
@@ -660,7 +712,11 @@ class _CandlestickPainter extends CustomPainter {
       final c = candles[i];
       final x = i * slotWidth + slotWidth / 2;
       final isUp = c.close >= c.open;
-      final color = isUp ? AppColors.emerald400 : AppColors.rose500;
+      // Otomatik eklenen (kullanıcının seçmediği) geçmiş soluk çizilir —
+      // bkz. CandlestickChart.paddingCandleCount doc yorumu.
+      final isPadding = i < paddingCandleCount;
+      final baseColor = isUp ? AppColors.emerald400 : AppColors.rose500;
+      final color = isPadding ? baseColor.withValues(alpha: 0.4) : baseColor;
 
       final wickPaint = Paint()
         ..color = color
@@ -685,6 +741,7 @@ class _CandlestickPainter extends CustomPainter {
 
     _drawOverlayLine(canvas, size, sma, AppColors.amber500);
     _drawOverlayLine(canvas, size, ema, AppColors.cyan500);
+    _drawPaddingLabel(canvas, size);
 
     if (highlightIndex != null) {
       final idx = highlightIndex!.clamp(0, candles.length - 1);
@@ -720,7 +777,8 @@ class _CandlestickPainter extends CustomPainter {
         oldDelegate.labelEvery != labelEvery ||
         oldDelegate.sma != sma ||
         oldDelegate.ema != ema ||
-        oldDelegate.highlightIndex != highlightIndex;
+        oldDelegate.highlightIndex != highlightIndex ||
+        oldDelegate.paddingCandleCount != paddingCandleCount;
   }
 }
 
@@ -728,13 +786,21 @@ class _RsiPainter extends CustomPainter {
   final List<Candle> candles;
   final double slotWidth;
   final int? highlightIndex;
+  final int paddingCandleCount;
 
-  _RsiPainter({required this.candles, required this.slotWidth, required this.highlightIndex});
+  _RsiPainter({
+    required this.candles,
+    required this.slotWidth,
+    required this.highlightIndex,
+    required this.paddingCandleCount,
+  });
 
   double _y(double value, double height) => height - (value / 100) * height;
 
   @override
   void paint(Canvas canvas, Size size) {
+    _paintPaddingBand(canvas, size, slotWidth, paddingCandleCount);
+
     final refPaint = Paint()
       ..color = AppColors.slate800.withValues(alpha: 0.5)
       ..strokeWidth = 1;
@@ -771,7 +837,8 @@ class _RsiPainter extends CustomPainter {
   bool shouldRepaint(covariant _RsiPainter oldDelegate) {
     return oldDelegate.candles != candles ||
         oldDelegate.slotWidth != slotWidth ||
-        oldDelegate.highlightIndex != highlightIndex;
+        oldDelegate.highlightIndex != highlightIndex ||
+        oldDelegate.paddingCandleCount != paddingCandleCount;
   }
 }
 
@@ -782,6 +849,7 @@ class _MacdPainter extends CustomPainter {
   final double minMacd;
   final double maxMacd;
   final int? highlightIndex;
+  final int paddingCandleCount;
 
   _MacdPainter({
     required this.candles,
@@ -790,6 +858,7 @@ class _MacdPainter extends CustomPainter {
     required this.minMacd,
     required this.maxMacd,
     required this.highlightIndex,
+    required this.paddingCandleCount,
   });
 
   double _y(double value, double height) {
@@ -800,6 +869,8 @@ class _MacdPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    _paintPaddingBand(canvas, size, slotWidth, paddingCandleCount);
+
     final zeroY = _y(0, size.height);
     final zeroPaint = Paint()
       ..color = AppColors.slate800.withValues(alpha: 0.6)
@@ -857,7 +928,8 @@ class _MacdPainter extends CustomPainter {
         oldDelegate.slotWidth != slotWidth ||
         oldDelegate.minMacd != minMacd ||
         oldDelegate.maxMacd != maxMacd ||
-        oldDelegate.highlightIndex != highlightIndex;
+        oldDelegate.highlightIndex != highlightIndex ||
+        oldDelegate.paddingCandleCount != paddingCandleCount;
   }
 }
 
@@ -872,6 +944,7 @@ class _VolumePainter extends CustomPainter {
   final double candleWidth;
   final double maxVolume;
   final int? highlightIndex;
+  final int paddingCandleCount;
 
   _VolumePainter({
     required this.candles,
@@ -879,10 +952,13 @@ class _VolumePainter extends CustomPainter {
     required this.candleWidth,
     required this.maxVolume,
     required this.highlightIndex,
+    required this.paddingCandleCount,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    _paintPaddingBand(canvas, size, slotWidth, paddingCandleCount);
+
     if (maxVolume > 0) {
       for (var i = 0; i < candles.length; i++) {
         final v = candles[i].volume;
@@ -913,6 +989,7 @@ class _VolumePainter extends CustomPainter {
     return oldDelegate.candles != candles ||
         oldDelegate.slotWidth != slotWidth ||
         oldDelegate.maxVolume != maxVolume ||
-        oldDelegate.highlightIndex != highlightIndex;
+        oldDelegate.highlightIndex != highlightIndex ||
+        oldDelegate.paddingCandleCount != paddingCandleCount;
   }
 }

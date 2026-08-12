@@ -26,6 +26,9 @@ class ChartResultSection extends StatelessWidget {
   final bool loading;
   final String? error;
   final CandleResult? result;
+  // Seçilen aralıkta yeterli mum yoksa (bkz. utils/candle_padding.dart)
+  // CandlestickChart'a iletilir — orada soluk/gölgeli çizilir.
+  final int paddingCandleCount;
   final List<Widget> leadingActions;
 
   const ChartResultSection({
@@ -42,6 +45,7 @@ class ChartResultSection extends StatelessWidget {
     required this.loading,
     required this.error,
     required this.result,
+    this.paddingCandleCount = 0,
     this.leadingActions = const [],
   });
 
@@ -99,7 +103,7 @@ class ChartResultSection extends StatelessWidget {
             child: Text(error!, style: const TextStyle(color: AppColors.slate100)),
           ),
         if (result != null) ...[
-          CandlestickChart(result: result!),
+          CandlestickChart(result: result!, paddingCandleCount: paddingCandleCount),
           const SizedBox(height: 16),
           CandleTable(result: result!),
         ],

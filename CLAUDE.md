@@ -569,6 +569,40 @@ a colored `X/100` score with no textual Al/Sat tier — now also prints
 `SummarySignal.forScore(score).label` beneath it, thresholds copied from
 `summarySignalForScore()` in the backend's `technical_analysis.dart`).
 
+`utils/candle_padding.dart`'s `fetchCandlesWithMinimum()` addresses a real
+usability bug: a narrow date range + coarse interval (e.g. a 2-month range
+with "Aylık"/`1mo`) returns so few candles that `CandlestickChart`'s
+`slotWidth` clamp (`.clamp(1.5, CandlestickChart.maxSlotWidth)`) can't
+stretch them to fill the card — the chart renders as a thin sliver in a
+mostly-empty card. `HomeScreen`/`TrackingScreen` (the only two screens with
+a date-range picker + `CandlestickChart`) call it instead of
+`MarketApi.candles()` directly: it fetches the user's chosen range first
+(no extra cost in the common case), and only if the result has fewer
+candles than `_estimateMinCandles(context)` — `(MediaQuery width minus a
+per-screen "chrome" constant) / CandlestickChart.maxSlotWidth`, clamped to
+`[8, 60]` so a huge desktop window doesn't demand decades of `12mo` history
+— does it re-fetch with an earlier, heuristically-computed start date (a
+rough calendar-days-per-candle table per `ChartInterval`, ×1.4 overshoot,
+clamped to `DateTime(2000)` and, for intraday, to Yahoo's ~730-day ceiling)
+wrapped in try/catch so a second request that oversteps Yahoo's history
+limit falls back to the original (working) result instead of surfacing an
+error. The user's own `_dateRange` selection is never mutated — only the
+fetch is widened; re-opening the picker still shows what they actually
+picked. `paddingCandleCount` (how many of the *returned* candles came from
+this padding, computed as the simple difference between the padded and
+original candle counts — both calls return chronologically, so no date
+parsing of the server-formatted `period` strings is needed) flows through
+`ChartResultSection` into `CandlestickChart`, which renders that many
+leading candles at reduced opacity behind a shared `_paintPaddingBand()`
+band + divider line (called by all four panel painters, same pattern as
+`_paintCrosshairLine()`) and a "← Otomatik eklendi" label on the price
+panel. The screens also show a one-time `SnackBar` after such a fetch —
+one message when padding succeeded (names the effective start date), a
+different one when extending didn't actually help (`historyLimited`, e.g.
+a recently-listed symbol has no more history to give) — matching the one
+existing `ScaffoldMessenger.showSnackBar` precedent in
+`tracking_screen.dart`.
+
 Candle "period" labels (e.g. `Q3 25`, `2024-2025`, `31.07.25`, `10.08 14:00`
 for the intraday intervals) are formatted server-side per interval — the
 frontend just displays `candle.period` as-is, it does no date formatting of
