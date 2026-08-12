@@ -38,6 +38,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   String? _bulkAddingPreset;
   String? _error;
 
+  // Uzun izleme listelerinde (ör. 300+ kripto) kategori sekmesi + sembol
+  // rozetleri sayfayı kalabalıklaştırıyor; kullanıcı bu bölümü katlayıp
+  // sadece toplam sayıyı görebilsin diye açık/kapalı durumu — sembol
+  // sayısı bilgisi (`X sembol izleniyor`) her zaman görünür kalır, sadece
+  // kategori sekmesi + rozet listesi gizlenir/gösterilir.
+  bool _watchlistSymbolsVisible = true;
+
   late final TabController _categoryTabController;
   int _lastCategoryIndex = 0;
 
@@ -292,39 +299,57 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             if (_loadingWatchlist)
               const Center(child: CircularProgressIndicator())
             else ...[
-              Text('${_watchlist.length} sembol izleniyor',
-                  style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 8),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: TabBar(
-                  controller: _categoryTabController,
-                  tabs: [
-                    Tab(text: 'BIST (${_bistSymbols.length})'),
-                    Tab(text: 'ABD (${_usSymbols.length})'),
-                    Tab(text: 'Kripto (${_cryptoSymbols.length})'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              Row(
                 children: [
-                  for (final s in _currentCategorySymbols)
-                    _WatchlistSymbolChip(
-                      symbol: s,
-                      isFavorite: widget.favorites.contains(s),
-                      onToggleFavorite: widget.onToggleFavorite == null
-                          ? null
-                          : () => widget.onToggleFavorite!(s),
-                      onRemove: () => _removeSymbol(s),
+                  Text('${_watchlist.length} sembol izleniyor',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => setState(
+                        () => _watchlistSymbolsVisible = !_watchlistSymbolsVisible),
+                    icon: Icon(
+                      _watchlistSymbolsVisible
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 18,
                     ),
+                    label: Text(_watchlistSymbolsVisible ? 'Gizle' : 'Göster'),
+                  ),
                 ],
               ),
+              if (_watchlistSymbolsVisible) ...[
+                const SizedBox(height: 8),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.slate800.withValues(alpha: 0.8)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: TabBar(
+                    controller: _categoryTabController,
+                    tabs: [
+                      Tab(text: 'BIST (${_bistSymbols.length})'),
+                      Tab(text: 'ABD (${_usSymbols.length})'),
+                      Tab(text: 'Kripto (${_cryptoSymbols.length})'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final s in _currentCategorySymbols)
+                      _WatchlistSymbolChip(
+                        symbol: s,
+                        isFavorite: widget.favorites.contains(s),
+                        onToggleFavorite: widget.onToggleFavorite == null
+                            ? null
+                            : () => widget.onToggleFavorite!(s),
+                        onRemove: () => _removeSymbol(s),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ],
           const SizedBox(height: 24),
