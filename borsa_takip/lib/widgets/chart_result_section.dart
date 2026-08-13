@@ -51,6 +51,11 @@ class ChartResultSection extends StatelessWidget {
   // doc yorumu. [forecast] ile aynı anda dolu olmaz (HomeScreen karşılıklı
   // dışlar).
   final PatternMatchResult? patternMatch;
+  // GBM/OU Olasılık Isı Konisi aktifken grafiğin HEMEN ALTINA eklenecek
+  // "Yapay Zeka / Kantitatif Gelecek Raporu" (bkz.
+  // widgets/forecast_report_card.dart) — null ise (Trend, tahmin yokken ya
+  // da TrackingScreen'in bugünkü davranışı) hiçbir şey değişmez.
+  final Widget? forecastReport;
 
   const ChartResultSection({
     super.key,
@@ -72,6 +77,7 @@ class ChartResultSection extends StatelessWidget {
     this.forecastControls,
     this.forecast,
     this.patternMatch,
+    this.forecastReport,
   });
 
   @override
@@ -136,6 +142,7 @@ class ChartResultSection extends StatelessWidget {
             forecast: forecast,
             patternMatch: patternMatch,
           ),
+          if (forecastReport != null) ...[const SizedBox(height: 16), forecastReport!],
           const SizedBox(height: 16),
           CandleTable(result: result!),
         ],

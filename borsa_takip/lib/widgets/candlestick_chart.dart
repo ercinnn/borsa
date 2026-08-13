@@ -170,19 +170,19 @@ class _CandlestickChartState extends State<CandlestickChart> {
   void _computeRanges() {
     final candles = widget.result.candles;
     if (candles.isEmpty) return;
-    // Tahmin fiyatları (özellikle GBM/OU'nun Olasılık Konisi'ndeki %95/%5
-    // sınırları) ve Tarihsel Benzerlik'in hayalet çizgileri geçmiş yüksek/
-    // düşük aralığının dışına çıkabilir — fiyat ekseni ve grid buna göre
-    // genişlemezse taşarlar.
+    // Tahmin fiyatları (özellikle GBM/OU'nun Olasılık Isı Konisi'ndeki p0/
+    // p100 sınırları) ve Tarihsel Benzerlik'in hayalet çizgileri geçmiş
+    // yüksek/düşük aralığının dışına çıkabilir — fiyat ekseni ve grid buna
+    // göre genişlemezse taşarlar.
     final forecastPrices = widget.forecast?.prices ?? const <double>[];
-    final forecastUpper = widget.forecast?.upperBand ?? const <double>[];
-    final forecastLower = widget.forecast?.lowerBand ?? const <double>[];
+    final fan = widget.forecast?.fan;
+    final fanExtremes = (fan == null || fan.isEmpty) ? const <double>[] : [...fan.p0, ...fan.p100];
     final ghostPrices = <double>[
       for (final m in widget.patternMatch?.matches ?? const <PatternMatch>[]) ...m.projectedPrices,
     ];
-    final rawMin = [...candles.map((c) => c.low), ...forecastPrices, ...forecastLower, ...ghostPrices]
+    final rawMin = [...candles.map((c) => c.low), ...forecastPrices, ...fanExtremes, ...ghostPrices]
         .reduce((a, b) => a < b ? a : b);
-    final rawMax = [...candles.map((c) => c.high), ...forecastPrices, ...forecastUpper, ...ghostPrices]
+    final rawMax = [...candles.map((c) => c.high), ...forecastPrices, ...fanExtremes, ...ghostPrices]
         .reduce((a, b) => a > b ? a : b);
     final pad = (rawMax - rawMin) * 0.08 == 0 ? 1.0 : (rawMax - rawMin) * 0.08;
     _minPrice = rawMin - pad;
@@ -247,11 +247,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final ribbonCandle = candles[_hoverIndex ?? candles.length - 1];
     final forecast = widget.forecast;
     final forecastPrices = forecast?.prices ?? const <double>[];
-    final forecastUpper = forecast?.upperBand ?? const <double>[];
-    final forecastLower = forecast?.lowerBand ?? const <double>[];
+    final forecastFan = forecast?.fan;
     final forecastPeriods = forecast?.periods ?? const <String>[];
     final forecastColor = forecast == null ? null : forecastModelColor(forecast.model);
-    final forecastHasCone = forecastUpper.isNotEmpty && forecastLower.isNotEmpty;
+    final forecastHasFan = forecastFan != null && !forecastFan.isEmpty;
     // Tarihsel Benzerlik (bkz. HomeScreen._toggleHistoricalPatternMatch) —
     // forecast ile aynı anda aktif olmaz (HomeScreen karşılıklı dışlar),
     // o yüzden "sağ uzantı" uzunluğu ikisinden hangisi doluysa ondan gelir.
@@ -292,7 +291,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                 _LegendDot(
                   color: forecastColor!,
                   label: 'Tahmin: ${forecast.model.shortLabel}'
-                      '${forecastHasCone ? ' (Olasılık Konisi)' : ''}',
+                      '${forecastHasFan ? ' (Olasılık Isı Konisi)' : ''}',
                 ),
                 const SizedBox(width: 10),
               ],
@@ -417,8 +416,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                       highlightIndex: _hoverIndex,
                                       paddingCandleCount: widget.paddingCandleCount,
                                       forecastPrices: forecastPrices,
-                                      forecastUpper: forecastUpper,
-                                      forecastLower: forecastLower,
+                                      forecastFan: forecastFan,
                                       forecastLabel: forecast?.model.shortLabel,
                                       forecastColor: forecastColor,
                                       ghostSeries: ghostSeries,
@@ -788,13 +786,12 @@ class _CandlestickPainter extends CustomPainter {
   final int paddingCandleCount;
   // Tahmin aktifse (bkz. CandlestickChart.forecast), geçmiş mumların hemen
   // sağına çizilecek "orta senaryo" fiyat dizisi + model kısaltması/rengi —
-  // boşsa hiçbir şey çizilmez. [forecastUpper]/[forecastLower] sadece GBM/
-  // OU'nun Monte Carlo Olasılık Konisi'nde dolu (%95/%5 yüzdelik dilimler);
-  // boşsa (Trend, ya da tahmin yokken) koni yerine düz bir kesikli çizgi +
-  // hafif tahmin bandı çizilir.
+  // boşsa hiçbir şey çizilmez. [forecastFan] sadece GBM/OU'nun Monte Carlo
+  // Olasılık Isı Konisi'nde dolu (5 katmanlı yüzdelik dilim serileri, bkz.
+  // models/forecast.dart ProbabilityFan); boşsa (Trend, ya da tahmin
+  // yokken) koni yerine düz bir kesikli çizgi + hafif tahmin bandı çizilir.
   final List<double> forecastPrices;
-  final List<double> forecastUpper;
-  final List<double> forecastLower;
+  final ProbabilityFan? forecastFan;
   final String? forecastLabel;
   final Color? forecastColor;
   // "Tarihsel Benzerlik" için en fazla 3 hayalet çizgi (bkz.
@@ -814,8 +811,7 @@ class _CandlestickPainter extends CustomPainter {
     required this.highlightIndex,
     required this.paddingCandleCount,
     this.forecastPrices = const [],
-    this.forecastUpper = const [],
-    this.forecastLower = const [],
+    this.forecastFan,
     this.forecastLabel,
     this.forecastColor,
     this.ghostSeries = const [],
@@ -870,8 +866,6 @@ class _CandlestickPainter extends CustomPainter {
     tp.paint(canvas, Offset(left, 4));
   }
 
-  bool get _hasForecastCone => forecastUpper.isNotEmpty && forecastLower.isNotEmpty;
-
   // Tahmin serilerinin (medyan/üst/alt — hepsi aynı x konumlarını
   // paylaşıyor) ortak başlangıç noktası: son gerçek kapanış. Hem çizgiler
   // hem koni dolgusu buradan başlar ki geçmişle tahmin arasında görsel bir
@@ -901,25 +895,39 @@ class _CandlestickPainter extends CustomPainter {
     }
   }
 
+  /// İki komşu yüzdelik dilim serisi ([lower]/[upper]) arasında kalan
+  /// alanı [band]'ın renk/opaklığıyla doldurur — anchor noktasından
+  /// (bugünün kapanışı) başlayıp [upper] boyunca ilerler, [lower] boyunca
+  /// geri döner. 5 katman da AYNI anchor'dan başladığından hepsi tek bir
+  /// noktadan "huni" gibi açılır — huni şekli ayrıca hesaplanmıyor, Monte
+  /// Carlo varyansının gün geçtikçe büyümesinden doğal olarak ortaya çıkıyor.
+  void _fillBand(Canvas canvas, Size size, List<double> lower, List<double> upper, ProbabilityFanBand band) {
+    if (lower.isEmpty || upper.isEmpty) return;
+    final path = _forecastSeriesPath(size, upper);
+    for (var i = lower.length - 1; i >= 0; i--) {
+      final x = (candles.length + i) * slotWidth + slotWidth / 2;
+      path.lineTo(x, _priceToY(lower[i], size.height));
+    }
+    path.close();
+    canvas.drawPath(path, Paint()..color = band.color.withValues(alpha: band.alpha));
+  }
+
   /// [_paintPaddingBand]'ın tersi: geçmişin SOLUNA değil, tahminin
   /// (varsa) SAĞINA renkli bir dolgu çizer — kullanıcının bu bölgenin
   /// gerçek veri olmadığını bir bakışta anlaması için. Diğer çizimlerden
-  /// önce çağrılmalı ki arka planda kalsın. GBM/OU'nun Monte Carlo koni
-  /// verisi varsa (%95/%5 sınırları) bunların arasında kalan, zamanla
-  /// genişleyen huni şeklindeki alanı "Confidence Band" olarak doldurur
-  /// (opacity 0.15 — huni şekli ayrıca hesaplanmıyor, Monte Carlo
-  /// varyansının gün geçtikçe büyümesinden doğal olarak ortaya çıkıyor);
-  /// koni yoksa (Trend) düz, hafif bir tahmin bandı çizilir.
+  /// önce çağrılmalı ki arka planda kalsın. GBM/OU'nun Monte Carlo fan
+  /// verisi varsa 5 katmanlı "Olasılık Isı Konisi"ni (bkz.
+  /// [probabilityFanBands]) çizer; yoksa (Trend) düz, hafif bir tahmin
+  /// bandı çizilir.
   void _paintForecastBackground(Canvas canvas, Size size) {
     if (forecastPrices.isEmpty || forecastColor == null || candles.isEmpty) return;
-    if (_hasForecastCone) {
-      final path = _forecastSeriesPath(size, forecastUpper);
-      for (var i = forecastLower.length - 1; i >= 0; i--) {
-        final x = (candles.length + i) * slotWidth + slotWidth / 2;
-        path.lineTo(x, _priceToY(forecastLower[i], size.height));
-      }
-      path.close();
-      canvas.drawPath(path, Paint()..color = forecastColor!.withValues(alpha: 0.15));
+    final fan = forecastFan;
+    if (fan != null && !fan.isEmpty) {
+      _fillBand(canvas, size, fan.p60, fan.p100, probabilityFanBands[4]); // p60-p100: Açık Yeşil
+      _fillBand(canvas, size, fan.p40, fan.p60, probabilityFanBands[3]); // p40-p60: Koyu Yeşil
+      _fillBand(canvas, size, fan.p30, fan.p40, probabilityFanBands[2]); // p30-p40: Gri
+      _fillBand(canvas, size, fan.p10, fan.p30, probabilityFanBands[1]); // p10-p30: Açık Kırmızı
+      _fillBand(canvas, size, fan.p0, fan.p10, probabilityFanBands[0]); // p0-p10: Koyu Kırmızı
       return;
     }
     final startX = candles.length * slotWidth;
@@ -930,14 +938,15 @@ class _CandlestickPainter extends CustomPainter {
     );
   }
 
-  /// Son gerçek kapanıştan başlayıp tahmin boyunca ilerleyen kesikli
-  /// çizgi(ler) + "bugün" sınırında ince bir ayraç + model adını gösteren
-  /// küçük bir etiket. Koni verisi varsa (bkz. _hasForecastCone) önce ince
-  /// %95/%5 kılavuz çizgileri, sonra üzerlerinde belirgin (daha kalın)
-  /// medyan çizgisi çizilir — yoksa (Trend) tek bir çizgi. `path
-  /// .computeMetrics()` ile elle kesikli çizgi çiziliyor — Flutter'ın kendi
-  /// dashed-line API'si yok ve bu, yeni bir paket bağımlılığı eklemeden
-  /// yeterli.
+  /// Son gerçek kapanıştan başlayıp tahmin boyunca ilerleyen, "orta
+  /// senaryo"yu (medyan) gösteren belirgin kesikli çizgi + "bugün"
+  /// sınırında ince bir ayraç + model adını gösteren küçük bir etiket.
+  /// 5 katmanlı dolgu zaten yüzdelik dilim sınırlarını gösterdiğinden
+  /// (bkz. _paintForecastBackground) burada ayrıca ince kılavuz çizgileri
+  /// çizilmiyor — aksi halde 5 dolgu + 6 çizgi görsel olarak çok kalabalık
+  /// olurdu. `path.computeMetrics()` ile elle kesikli çizgi çiziliyor —
+  /// Flutter'ın kendi dashed-line API'si yok ve bu, yeni bir paket
+  /// bağımlılığı eklemeden yeterli.
   void _drawForecastLines(Canvas canvas, Size size) {
     if (forecastPrices.isEmpty || forecastColor == null || candles.isEmpty) return;
     final boundaryX = candles.length * slotWidth;
@@ -946,16 +955,6 @@ class _CandlestickPainter extends CustomPainter {
       ..color = forecastColor!.withValues(alpha: 0.5)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(boundaryX, 0), Offset(boundaryX, size.height), dividerPaint);
-
-    if (_hasForecastCone) {
-      final guidePaint = Paint()
-        ..color = forecastColor!.withValues(alpha: 0.6)
-        ..strokeWidth = 1
-        ..style = PaintingStyle.stroke
-        ..strokeJoin = StrokeJoin.round;
-      _strokeDashed(canvas, _forecastSeriesPath(size, forecastUpper), guidePaint);
-      _strokeDashed(canvas, _forecastSeriesPath(size, forecastLower), guidePaint);
-    }
 
     final medianPaint = Paint()
       ..color = forecastColor!
@@ -1109,8 +1108,7 @@ class _CandlestickPainter extends CustomPainter {
         oldDelegate.highlightIndex != highlightIndex ||
         oldDelegate.paddingCandleCount != paddingCandleCount ||
         oldDelegate.forecastPrices != forecastPrices ||
-        oldDelegate.forecastUpper != forecastUpper ||
-        oldDelegate.forecastLower != forecastLower ||
+        oldDelegate.forecastFan != forecastFan ||
         oldDelegate.forecastLabel != forecastLabel ||
         oldDelegate.forecastColor != forecastColor ||
         oldDelegate.ghostSeries != ghostSeries;

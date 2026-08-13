@@ -16,6 +16,7 @@ import '../widgets/bento_kpi_row.dart';
 import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
 import '../widgets/favorite_symbols_bar.dart';
+import '../widgets/forecast_report_card.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/signal_quadrant_tile.dart';
 import '../widgets/symbol_search_field.dart';
@@ -252,8 +253,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// grafikteki geçmiş mum sayısı kadar — bu hem "geçmişte görünen bar
   /// sayısı kadar" isteğini karşılıyor hem de CandlestickChart'ın "bugünü
   /// tam ortala" geometrisinin temeli (geçmiş N + gelecek N = sınır tam
-  /// %50'de) — GBM/OU'nun 1000 patikalık Monte Carlo konisi de aynı N adımı
-  /// kullandığından bu kural koniyle de bozulmadan çalışır.
+  /// %50'de) — GBM/OU'nun 1000 patikalık Monte Carlo Olasılık Isı Konisi
+  /// de aynı N adımı kullandığından bu kural bozulmadan çalışır.
   void _toggleForecast(ForecastModelType model) {
     if (_forecast?.model == model) {
       setState(() => _forecast = null);
@@ -265,19 +266,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final steps = candles.length;
 
     List<double> median;
-    List<double>? upper;
-    List<double>? lower;
+    ProbabilityFan? fan;
     switch (model) {
       case ForecastModelType.gbm:
-        final cone = gbmForecastCone(closes, steps);
-        median = cone.median;
-        upper = cone.upper;
-        lower = cone.lower;
+        fan = gbmForecastFan(closes, steps);
+        median = fan.median;
       case ForecastModelType.ou:
-        final cone = ouForecastCone(closes, steps);
-        median = cone.median;
-        upper = cone.upper;
-        lower = cone.lower;
+        fan = ouForecastFan(closes, steps);
+        median = fan.median;
       case ForecastModelType.trend:
         median = trendForecast(closes, steps);
     }
@@ -294,9 +290,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _forecast = ForecastResult(
         model: model,
         prices: median,
-        upperBand: upper,
-        lowerBand: lower,
         periods: generateForecastPeriods(_interval, steps),
+        fan: (fan != null && !fan.isEmpty) ? fan : null,
       );
     });
   }
@@ -548,6 +543,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 : _buildChartOverlayControls(),
             forecast: _forecast,
             patternMatch: _patternMatch,
+            forecastReport: _forecast?.fan == null
+                ? null
+                : ForecastReportCard(forecast: _forecast!, currency: _result?.currency ?? ''),
             leadingActions: [
               if (_selectedSymbol != null) ...[
                 Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),

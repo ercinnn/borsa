@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:intl/intl.dart';
 
+import '../models/forecast.dart';
 import '../models/interval.dart';
 
 // Fiyatların matematiksel olarak sıfıra ya da altına düşmesini (özellikle
@@ -16,24 +17,6 @@ double _standardNormal(Random rnd) {
   final u1 = 1 - rnd.nextDouble(); // (0, 1]
   final u2 = rnd.nextDouble();
   return sqrt(-2 * log(u1)) * cos(2 * pi * u2);
-}
-
-/// GBM/OU koni fonksiyonlarının Monte Carlo ile ürettiği, gün-gün %95/
-/// medyan(%50)/%5 yüzdelik dilim serileri — bkz. `_coneFromDayValues`.
-/// Üçü de [prices]/[ForecastResult.prices] ile aynı uzunlukta (adım sayısı
-/// kadar); [median] grafikte "orta senaryo" çizgisi, [upper]/[lower] ise
-/// güven bandının sınırları olarak çizilir (bkz. candlestick_chart.dart
-/// `_drawForecastLines`/`_paintForecastCone`).
-class ForecastCone {
-  final List<double> upper;
-  final List<double> median;
-  final List<double> lower;
-
-  const ForecastCone({required this.upper, required this.median, required this.lower});
-
-  static const empty = ForecastCone(upper: [], median: [], lower: []);
-
-  bool get isEmpty => median.isEmpty;
 }
 
 /// GBM kalibrasyonu: [closes]'ın log-getirilerinden sürüklenme (μ) ve
@@ -90,17 +73,37 @@ class ForecastCone {
 const _defaultSimulations = 1000;
 
 /// Her gün adımı için [dayValues]'daki (o günün 1000 simülasyon sonucu)
-/// diziyi sıralayıp %95/%50/%5 yüzdelik dilimlerini okur — GBM ve OU koni
-/// fonksiyonlarının ortak son adımı.
-ForecastCone _coneFromDayValues(List<List<double>> dayValues) {
-  final upper = <double>[], median = <double>[], lower = <double>[];
-  for (final values in dayValues) {
-    final sorted = [...values]..sort();
-    upper.add(_percentile(sorted, 0.95));
+/// diziyi sıralayıp 5 katmanlı Olasılık Isı Konisi'nin dolgu sınırlarını
+/// (p0/p10/p30/p40/p60/p100) ve orta senaryo çizgisini (medyan/p50) okur;
+/// son gün için ayrıca [_computeStats] ile özet istatistikleri hesaplar —
+/// GBM ve OU fan fonksiyonlarının ortak son adımı.
+ProbabilityFan _reduceDayValues(List<List<double>> dayValues, double todayClose) {
+  final p0 = <double>[], p10 = <double>[], p30 = <double>[];
+  final p40 = <double>[], p60 = <double>[], p100 = <double>[], median = <double>[];
+  var stats = ForecastStats.zero;
+  for (var d = 0; d < dayValues.length; d++) {
+    final sorted = [...dayValues[d]]..sort();
+    p0.add(sorted.first);
+    p10.add(_percentile(sorted, 0.10));
+    p30.add(_percentile(sorted, 0.30));
+    p40.add(_percentile(sorted, 0.40));
+    p60.add(_percentile(sorted, 0.60));
+    p100.add(sorted.last);
     median.add(_percentile(sorted, 0.50));
-    lower.add(_percentile(sorted, 0.05));
+    if (d == dayValues.length - 1) {
+      stats = _computeStats(sorted, todayClose);
+    }
   }
-  return ForecastCone(upper: upper, median: median, lower: lower);
+  return ProbabilityFan(
+    p0: p0,
+    p10: p10,
+    p30: p30,
+    p40: p40,
+    p60: p60,
+    p100: p100,
+    median: median,
+    stats: stats,
+  );
 }
 
 double _percentile(List<double> sorted, double p) {
@@ -108,17 +111,47 @@ double _percentile(List<double> sorted, double p) {
   return sorted[idx];
 }
 
+/// [sortedFinalDay] (ufuk sonu — 30. gün/bar — simülasyon sonuçları,
+/// zaten sıralı) üzerinden "Yapay Zeka / Kantitatif Gelecek Raporu"
+/// modülünün (bkz. widgets/forecast_report_card.dart) ihtiyaç duyduğu tüm
+/// özet istatistikleri tek geçişte hesaplar.
+ForecastStats _computeStats(List<double> sortedFinalDay, double todayClose) {
+  final n = sortedFinalDay.length;
+  final mean = sortedFinalDay.reduce((a, b) => a + b) / n;
+  final variance =
+      sortedFinalDay.map((v) => (v - mean) * (v - mean)).reduce((a, b) => a + b) / n;
+  final stdDev = sqrt(variance);
+  // Çarpıklık (skewness): standartlaştırılmış sapmaların küpünün ortalaması.
+  final skewness = stdDev == 0
+      ? 0.0
+      : sortedFinalDay.map((v) => pow((v - mean) / stdDev, 3)).reduce((a, b) => a + b) / n;
+  final winCount = sortedFinalDay.where((v) => v > todayClose).length;
+  final p5 = _percentile(sortedFinalDay, 0.05);
+  return ForecastStats(
+    mean: mean,
+    volatilityPercent: todayClose == 0 ? 0.0 : stdDev / todayClose * 100,
+    skewness: skewness.toDouble(),
+    medianTarget: _percentile(sortedFinalDay, 0.50),
+    bullTarget: sortedFinalDay.last,
+    bearTarget: sortedFinalDay.first,
+    winProbabilityPercent: 100 * winCount / n,
+    // Value at Risk: %5 yüzdelik dilimin bugüne göre % değişimi — bir
+    // kayıp olduğundan doğal olarak negatif çıkar.
+    valueAtRisk95Percent: todayClose == 0 ? 0.0 : (p5 - todayClose) / todayClose * 100,
+  );
+}
+
 /// Geometric Brownian Motion: [_gbmParams] ile kalibre edilen sürüklenme/
 /// volatiliteyle [simulations] adet bağımsız stokastik patika (S_(t+1) =
-/// S_t · exp((μ - σ²/2) + σ·Z)) simüle edip her gün için %95/medyan/%5
-/// yüzdelik dilimlere indirger — "Olasılık Konisi"nin matematiksel temeli.
-/// Rastgelelik tohumlanmıyor: kullanıcı butona her bastığında yeni bir
-/// senaryo seti görsün diye (bkz. HomeScreen._toggleForecast, aynı butona
-/// tekrar basmak tahmini kapatır, üçüncü kez basmak yeni bir koni üretir).
-ForecastCone gbmForecastCone(List<double> closes, int steps, {int simulations = _defaultSimulations}) {
-  if (steps <= 0) return ForecastCone.empty;
+/// S_t · exp((μ - σ²/2) + σ·Z)) simüle edip 5 katmanlı Olasılık Isı
+/// Konisi'ne indirger. Rastgelelik tohumlanmıyor: kullanıcı butona her
+/// bastığında yeni bir senaryo seti görsün diye (bkz.
+/// HomeScreen._toggleForecast, aynı butona tekrar basmak tahmini kapatır,
+/// üçüncü kez basmak yeni bir fan üretir).
+ProbabilityFan gbmForecastFan(List<double> closes, int steps, {int simulations = _defaultSimulations}) {
+  if (steps <= 0) return ProbabilityFan.empty;
   final params = _gbmParams(closes);
-  if (params == null) return ForecastCone.empty;
+  if (params == null) return ProbabilityFan.empty;
 
   final rnd = Random();
   // dayValues[d]: d. gün sonunda 1000 simülasyonun ürettiği fiyat örnekleri.
@@ -133,15 +166,15 @@ ForecastCone gbmForecastCone(List<double> closes, int steps, {int simulations = 
       dayValues[d][s] = last;
     }
   }
-  return _coneFromDayValues(dayValues);
+  return _reduceDayValues(dayValues, closes.last);
 }
 
 /// Ornstein-Uhlenbeck (ortalamaya dönüş): [_ouParams] ile kalibre edilen
 /// κ/θ/σ'yla [simulations] adet bağımsız stokastik patika (κ(θ - X_t)
-/// sürüklenmesi + Gauss gürültüsü) simüle edip GBM konisiyle aynı şekilde
-/// gün-gün %95/medyan/%5 yüzdelik dilimlere indirger.
-ForecastCone ouForecastCone(List<double> closes, int steps, {int simulations = _defaultSimulations}) {
-  if (closes.length < 3 || steps <= 0) return ForecastCone.empty;
+/// sürüklenmesi + Gauss gürültüsü) simüle edip GBM fanıyla aynı şekilde
+/// 5 katmanlı Olasılık Isı Konisi'ne indirger.
+ProbabilityFan ouForecastFan(List<double> closes, int steps, {int simulations = _defaultSimulations}) {
+  if (closes.length < 3 || steps <= 0) return ProbabilityFan.empty;
   final params = _ouParams(closes);
 
   final rnd = Random();
@@ -153,7 +186,7 @@ ForecastCone ouForecastCone(List<double> closes, int steps, {int simulations = _
       dayValues[d][s] = last;
     }
   }
-  return _coneFromDayValues(dayValues);
+  return _reduceDayValues(dayValues, closes.last);
 }
 
 /// Holt'un doğrusal trend projeksiyonu (double exponential smoothing) —
