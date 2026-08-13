@@ -235,7 +235,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// grafikteki geçmiş mum sayısı kadar — bu hem "geçmişte görünen bar
   /// sayısı kadar" isteğini karşılıyor hem de CandlestickChart'ın "bugünü
   /// tam ortala" geometrisinin temeli (geçmiş N + gelecek N = sınır tam
-  /// %50'de).
+  /// %50'de) — GBM/OU'nun 1000 patikalık Monte Carlo konisi de aynı N adımı
+  /// kullandığından bu kural koniyle de bozulmadan çalışır.
   void _toggleForecast(ForecastModelType model) {
     if (_forecast?.model == model) {
       setState(() => _forecast = null);
@@ -245,12 +246,25 @@ class _HomeScreenState extends State<HomeScreen> {
     if (candles.isEmpty) return;
     final closes = [for (final c in candles) c.close];
     final steps = candles.length;
-    final prices = switch (model) {
-      ForecastModelType.gbm => gbmForecast(closes, steps),
-      ForecastModelType.ou => ouForecast(closes, steps),
-      ForecastModelType.trend => trendForecast(closes, steps),
-    };
-    if (prices.isEmpty) {
+
+    List<double> median;
+    List<double>? upper;
+    List<double>? lower;
+    switch (model) {
+      case ForecastModelType.gbm:
+        final cone = gbmForecastCone(closes, steps);
+        median = cone.median;
+        upper = cone.upper;
+        lower = cone.lower;
+      case ForecastModelType.ou:
+        final cone = ouForecastCone(closes, steps);
+        median = cone.median;
+        upper = cone.upper;
+        lower = cone.lower;
+      case ForecastModelType.trend:
+        median = trendForecast(closes, steps);
+    }
+    if (median.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tahmin için yeterli geçmiş veri yok.')),
       );
@@ -259,7 +273,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _forecast = ForecastResult(
         model: model,
-        prices: prices,
+        prices: median,
+        upperBand: upper,
+        lowerBand: lower,
         periods: generateForecastPeriods(_interval, steps),
       );
     });

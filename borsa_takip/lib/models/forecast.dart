@@ -1,6 +1,6 @@
 /// Grafik sekmesindeki tahmin butonlarının ("GBM"/"OU"/"Trend") temsil
 /// ettiği matematiksel model — bkz. utils/forecast_engine.dart'taki üç
-/// fonksiyon (gbmForecast/ouForecast/trendForecast). Sadece hangi modelin
+/// fonksiyon (gbmForecastCone/ouForecastCone/trendForecast). Sadece hangi modelin
 /// seçili olduğunu ve kullanıcıya gösterilecek etiket/açıklamayı taşır;
 /// hesaplamanın kendisi engine'de, rengi utils/forecast_color.dart'ta.
 /// [description] chip'in üzerindeki kısa tooltip için (teknik isim),
@@ -46,18 +46,28 @@ enum ForecastModelType {
   const ForecastModelType(this.shortLabel, this.description, this.infoTitle, this.infoBody);
 }
 
-/// Bir tahmin butonuna basıldığında üretilen sonuç: [prices] ile [periods]
-/// birebir eşleşir (ikisi de aynı uzunlukta, geçmiş mum sayısı kadar —
-/// bkz. HomeScreen._toggleForecast). CandlestickChart bunu geçmiş verinin
-/// hemen sağına, kesikli bir çizgiyle çizer.
+/// Bir tahmin butonuna basıldığında üretilen sonuç. [prices]/[upperBand]/
+/// [lowerBand]/[periods] hepsi aynı uzunlukta (geçmiş mum sayısı kadar —
+/// bkz. HomeScreen._toggleForecast). [prices] her zaman dolu: GBM/OU için
+/// 1000 Monte Carlo patikasının %50 (medyan) yüzdelik dilimi, Trend için
+/// tek deterministik projeksiyon. [upperBand]/[lowerBand] sadece GBM/OU'da
+/// dolu (%95/%5 yüzdelik dilimler) — Trend'de null, çünkü deterministik bir
+/// projeksiyonun simülasyon dağılımı yok, dolayısıyla bir "Olasılık
+/// Konisi"nin matematiksel temeli de yok. CandlestickChart bunları geçmiş
+/// verinin hemen sağına, [upperBand]/[lowerBand] doluysa aralarında
+/// yarı saydam bir güven bandıyla birlikte çizer.
 class ForecastResult {
   final ForecastModelType model;
   final List<double> prices;
+  final List<double>? upperBand;
+  final List<double>? lowerBand;
   final List<String> periods;
 
   const ForecastResult({
     required this.model,
     required this.prices,
+    this.upperBand,
+    this.lowerBand,
     required this.periods,
   });
 }
