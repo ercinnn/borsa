@@ -265,6 +265,46 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  /// "i" ikonuna basıldığında açılan, modelin ne yaptığını sıradan dille
+  /// anlatan bilgi diyaloğu — ChoiceChip'in `onSelected`'ından tamamen
+  /// ayrı bir `IconButton` olduğundan (bkz. _buildForecastBar, ikisi iç
+  /// içe değil kardeş widget) bu modeli SEÇMEZ, sadece açıklamayı gösterir.
+  void _showForecastInfoDialog(ForecastModelType model) {
+    final color = forecastModelColor(model);
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.slate900,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: color.withValues(alpha: 0.4)),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.info_outline, color: color, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                model.infoTitle,
+                style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          model.infoBody,
+          style: const TextStyle(color: AppColors.slate100, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Anladım'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildForecastBar() {
     return Wrap(
       spacing: 8,
@@ -273,14 +313,31 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Text('Tahmin:', style: Theme.of(context).textTheme.labelSmall),
         for (final model in ForecastModelType.values)
-          Tooltip(
-            message: model.description,
-            child: ChoiceChip(
-              label: Text(model.shortLabel),
-              selected: _forecast?.model == model,
-              selectedColor: forecastModelColor(model).withValues(alpha: 0.25),
-              onSelected: (_) => _toggleForecast(model),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Tooltip(
+                message: 'Bu modelin nasıl çalıştığını öğren',
+                child: IconButton(
+                  icon: const Icon(Icons.info_outline, size: 16),
+                  onPressed: () => _showForecastInfoDialog(model),
+                  color: forecastModelColor(model),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Tooltip(
+                message: model.description,
+                child: ChoiceChip(
+                  label: Text(model.shortLabel),
+                  selected: _forecast?.model == model,
+                  selectedColor: forecastModelColor(model).withValues(alpha: 0.25),
+                  onSelected: (_) => _toggleForecast(model),
+                ),
+              ),
+            ],
           ),
         if (_forecast != null)
           ActionChip(
