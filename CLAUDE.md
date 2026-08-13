@@ -603,6 +603,74 @@ a recently-listed symbol has no more history to give) — matching the one
 existing `ScaffoldMessenger.showSnackBar` precedent in
 `tracking_screen.dart`.
 
+`ChartResultSection` (`widgets/chart_result_section.dart` — the interval
+chips + date/fetch controls + chart/table block shared by `HomeScreen` and
+`TrackingScreen`) has one extension point: an optional `resultHeader`
+widget, rendered directly above `CandlestickChart` when a result exists.
+Both `HomeScreen` and `TrackingScreen` pass a `BentoKpiRow`
+(`widgets/bento_kpi_row.dart`) here — four small `GlassCard` tiles (son
+kapanış + dönem toplam % değişim, dönem yüksek, dönem düşük, toplam hacim).
+All four numbers are derived from the already-fetched `result.candles` — no
+extra API call — including `periodLow`, the same "lowest candle in range"
+`reduce` `CandleTable` already computes (bkz. `candle_table.dart`), since
+Grafik's own title is "Aylık En Düşük Değerler". Tiles are laid out via a
+`LayoutBuilder`-driven `Wrap` (fixed-width `SizedBox`es, 4 columns ≥640px
+else 2) — deliberately **not** `GridView.count`: a `GridView` (even
+`shrinkWrap: true` + `NeverScrollableScrollPhysics`) is still its own
+`Scrollable`, and mouse-wheel `PointerScrollEvent`s in Flutter web get
+claimed by the innermost `Scrollable` under the cursor with no bubbling to
+an ancestor `SingleChildScrollView` when that inner one can't actually
+scroll — hovering over the KPI row made the whole page's scroll appear to
+silently hang (found live while building the layout below; a `Wrap` has no
+`Scrollable` at all, so the problem can't recur here). Each tile's height
+is intentionally content-driven rather than a fixed `childAspectRatio` —
+an earlier version locked one, and it overflowed by a few pixels the moment
+the tile's available width shrank (see the hero/sidebar split below), since
+a width-locked aspect ratio also shrinks the height regardless of how much
+vertical room the label/value/subtitle text actually needs.
+
+Grafik (`HomeScreen`) additionally lays its content out as a true bento
+grid, not just the KPI strip: a `LayoutBuilder` at ≥900px width puts the
+"Zaman Aralığı" card (interval chips, `BentoKpiRow`, `CandlestickChart`,
+`CandleTable`) in an `Expanded(flex: 8)` hero column beside a
+`flex: 4` sidebar column (stacked into one `Column` below 900px instead),
+containing two more self-fetching tiles: `WatchlistTile`
+(`widgets/watchlist_tile.dart`) shows up to 6 of the user's Favoriler
+symbols with live last price, day-over-day % change, and a small
+`CustomPainter` sparkline (own `/api/candles` call per symbol, last 30
+days, capped at 6 to bound the request burst — tapping a row calls the same
+`_selectSymbol` the search field/favorite bar use), and `SignalQuadrantTile`
+(`widgets/signal_quadrant_tile.dart`) shows the *currently selected*
+symbol's `/api/technical` overall Güçlü Al..Güçlü Sat badge + score plus
+RSI(14)/MACD(12,26)/STOCH(9,6) %K rows (matched by `IndicatorRow.name`,
+same three the backend already computes — see `technical_analysis.dart` in
+Architecture above; Bollinger Bands were part of an early draft of this
+tile but dropped since the backend doesn't compute them and adding a new
+indicator was out of scope for this pass). Both tiles fetch independently
+of the hero chart (favorites/selected-symbol are already known before
+"Getir" is even pressed) and re-fetch on `didUpdateWidget` when their
+inputs change, the same self-contained-fetch pattern as `TechnicalScreen`'s
+own widgets. `estimateMinCandles` accounts for the narrower hero column on
+wide screens (8/12 of the page width minus the sidebar gap, not the full
+page) so the auto-history-padding threshold (bkz. above) doesn't
+overestimate how many candles are needed and pad unnecessarily. An earlier
+draft of this layout also included Order Book/Piyasa Derinliği and Temel
+Rasyolar (F/K, PD/DD, FD/FAVÖK, ROE, Net Borç/FAVÖK) tiles per an initial
+spec; both were dropped before implementation — the former would have
+needed fabricated data (Yahoo's chart endpoint has no order-book depth),
+the latter would have revived a fragile Yahoo cookie+crumb dependency
+(bkz. `yahoo_fundamentals.dart` in Architecture above) for a tab
+(Grafik) that has never needed it, and the existing Temel Analiz tab
+already covers that ground.
+
+`formatCompact()` (K/M/B suffixes, e.g. `2.4M`) moved from a
+`candlestick_chart.dart`-private function to `utils/price_format.dart` so
+`bento_kpi_row.dart` could share it. Separately, `TrackingScreen` and
+`ComparisonScreen`'s control panels are now wrapped in a `GlassCard`
+(matching `HomeScreen`/`BacktestScreen`) — they used to render bare on the
+slate background, the one visual inconsistency found when auditing which
+screens do/don't use `GlassCard` as their primary container.
+
 Candle "period" labels (e.g. `Q3 25`, `2024-2025`, `31.07.25`, `10.08 14:00`
 for the intraday intervals) are formatted server-side per interval — the
 frontend just displays `candle.period` as-is, it does no date formatting of

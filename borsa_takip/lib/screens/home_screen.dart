@@ -7,11 +7,14 @@ import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../utils/candle_padding.dart';
+import '../widgets/bento_kpi_row.dart';
 import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
 import '../widgets/favorite_symbols_bar.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/signal_quadrant_tile.dart';
 import '../widgets/symbol_search_field.dart';
+import '../widgets/watchlist_tile.dart';
 
 // Grafik sekmesinde ChartResultSection'ı saran kart zincirinin tahmini
 // "chrome"u — sayfa padding'i (24×2) + bu GlassCard'ın kendi padding'i
@@ -21,6 +24,13 @@ import '../widgets/symbol_search_field.dart';
 // MediaQuery genişliğinden ne kadar düşülmesi gerektiğine dair kaba bir
 // tahmin (bkz. _estimateMinCandles, utils/candle_padding.dart).
 const _chartChromeWidth = 48 + 48 + 24;
+
+// _BentoLayout'un satır/sütun geçişiyle aynı eşik — geniş ekranda hero
+// sütunu tüm genişliği değil 12 kolonluk gridin 8'ini kaplıyor (bkz. build()
+// altındaki LayoutBuilder), bu yüzden _estimateMinCandles de aynı eşiğin
+// altında/üstünde farklı bir genişlik varsaymalı.
+const _bentoBreakpoint = 900.0;
+const _bentoGap = 24.0;
 
 class HomeScreen extends StatefulWidget {
   // Bildirimler sekmesinden bir sembole tıklanınca RootShell bu ikisini
@@ -88,7 +98,14 @@ class _HomeScreenState extends State<HomeScreen> {
   int _handledRequestId = 0;
 
   int _estimateMinCandles(BuildContext context) {
-    final available = MediaQuery.sizeOf(context).width - _chartChromeWidth;
+    final totalWidth = MediaQuery.sizeOf(context).width;
+    // Geniş ekranda hero sütunu toplam genişliğin ~8/12'si (bkz.
+    // _bentoBreakpoint yorumu) — sidebar'ın ayırdığı payı ve aradaki
+    // boşluğu düşmezsek gerekenden çok daha fazla mum istenir, bu da
+    // gereksiz "otomatik eklendi" uzatmalarına/SnackBar'lara yol açar.
+    final heroWidth =
+        totalWidth >= _bentoBreakpoint ? (totalWidth - _bentoGap) * 8 / 12 : totalWidth;
+    final available = heroWidth - _chartChromeWidth;
     return (available / CandlestickChart.maxSlotWidth).ceil().clamp(8, 60);
   }
 
@@ -203,6 +220,62 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final heroColumn = GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Zaman Aralığı', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 16),
+          ChartResultSection(
+            intervals: ChartInterval.longTerm,
+            selectedInterval: _interval,
+            onSelectInterval: _selectInterval,
+            dateRange: _dateRange,
+            dateFormat: _dateFormat,
+            onPickDateRange: _pickDateRange,
+            fetchLabel: 'Getir',
+            fetchIcon: Icons.show_chart,
+            onFetch: _selectedSymbol == null || _loading ? null : _fetch,
+            loading: _loading,
+            error: _error,
+            result: _result,
+            paddingCandleCount: _paddingCandleCount,
+            resultHeader: _result == null || _result!.candles.isEmpty
+                ? null
+                : BentoKpiRow(result: _result!),
+            leadingActions: [
+              if (_selectedSymbol != null) ...[
+                Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
+                _FavoriteToggleButton(
+                  symbol: _selectedSymbol!.symbol,
+                  isFavorite: widget.favorites.contains(_selectedSymbol!.symbol),
+                  onToggle: widget.onToggleFavorite,
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+
+    // Sidebar, hero'nun aksine bir "sonuç" beklemez — favoriler listesi ve
+    // seçili sembol her zaman elde olduğundan grafik daha getirilmeden önce
+    // de kendi verisini gösterebilir (bkz. WatchlistTile/SignalQuadrantTile'ın
+    // kendi fetch'lerini kendi yönetmesi).
+    final sidebarColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        WatchlistTile(
+          favorites: widget.favorites,
+          api: _api,
+          selectedSymbol: _selectedSymbol?.symbol,
+          onSelect: (s) => _selectSymbol(MarketSymbol(symbol: s, name: s)),
+        ),
+        const SizedBox(height: 24),
+        SignalQuadrantTile(api: _api, symbol: _selectedSymbol?.symbol),
+      ],
+    );
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -228,39 +301,27 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          GlassCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Zaman Aralığı', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 16),
-                ChartResultSection(
-                  intervals: ChartInterval.longTerm,
-                  selectedInterval: _interval,
-                  onSelectInterval: _selectInterval,
-                  dateRange: _dateRange,
-                  dateFormat: _dateFormat,
-                  onPickDateRange: _pickDateRange,
-                  fetchLabel: 'Getir',
-                  fetchIcon: Icons.show_chart,
-                  onFetch: _selectedSymbol == null || _loading ? null : _fetch,
-                  loading: _loading,
-                  error: _error,
-                  result: _result,
-                  paddingCandleCount: _paddingCandleCount,
-                  leadingActions: [
-                    if (_selectedSymbol != null) ...[
-                      Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),
-                      _FavoriteToggleButton(
-                        symbol: _selectedSymbol!.symbol,
-                        isFavorite: widget.favorites.contains(_selectedSymbol!.symbol),
-                        onToggle: widget.onToggleFavorite,
-                      ),
-                    ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth >= _bentoBreakpoint) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 8, child: heroColumn),
+                    const SizedBox(width: _bentoGap),
+                    Expanded(flex: 4, child: sidebarColumn),
                   ],
-                ),
-              ],
-            ),
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  heroColumn,
+                  const SizedBox(height: _bentoGap),
+                  sidebarColumn,
+                ],
+              );
+            },
           ),
         ],
       ),

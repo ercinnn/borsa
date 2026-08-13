@@ -30,3 +30,15 @@ String formatPrice(num value) {
     decimals = decimals < 6 ? 6 : decimals + 1;
   }
 }
+
+/// Büyük hacim/tutar değerlerini K/M/B ekleriyle kısaltır (ör. 2.4M).
+/// `widgets/candlestick_chart.dart`'ın hacim panel/ekseni ile
+/// `widgets/bento_kpi_row.dart`'ın "Toplam Hacim" karosu arasında paylaşılır.
+String formatCompact(double value) {
+  final abs = value.abs();
+  final sign = value.isNegative ? '-' : '';
+  if (abs >= 1e9) return '$sign${(abs / 1e9).toStringAsFixed(1)}B';
+  if (abs >= 1e6) return '$sign${(abs / 1e6).toStringAsFixed(1)}M';
+  if (abs >= 1e3) return '$sign${(abs / 1e3).toStringAsFixed(1)}K';
+  return '$sign${abs.toStringAsFixed(0)}';
+}

@@ -371,16 +371,6 @@ List<double?> _exponentialMovingAverage(List<Candle> candles, int period) {
   return out;
 }
 
-/// Büyük hacim/tutar değerlerini K/M/B ekleriyle kısaltır (ör. 2.4M).
-String _formatCompact(double value) {
-  final abs = value.abs();
-  final sign = value.isNegative ? '-' : '';
-  if (abs >= 1e9) return '$sign${(abs / 1e9).toStringAsFixed(1)}B';
-  if (abs >= 1e6) return '$sign${(abs / 1e6).toStringAsFixed(1)}M';
-  if (abs >= 1e3) return '$sign${(abs / 1e3).toStringAsFixed(1)}K';
-  return '$sign${abs.toStringAsFixed(0)}';
-}
-
 class _LegendDot extends StatelessWidget {
   final Color color;
   final String label;
@@ -455,7 +445,7 @@ class _OhlcRibbon extends StatelessWidget {
               '(${isUp ? '+' : ''}${changePct.toStringAsFixed(2)}%)',
           valueColor: color,
         ),
-        if (candle.volume != null) field('HACİM', _formatCompact(candle.volume!)),
+        if (candle.volume != null) field('HACİM', formatCompact(candle.volume!)),
       ],
     );
   }
@@ -574,7 +564,7 @@ class _VolumeAxis extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(_formatCompact(maxVolume), style: labelStyle),
+        Text(formatCompact(maxVolume), style: labelStyle),
         const Text('0', style: TextStyle(fontSize: 9, color: AppColors.slate400)),
       ],
     );

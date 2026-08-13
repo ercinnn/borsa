@@ -30,6 +30,13 @@ class ChartResultSection extends StatelessWidget {
   // CandlestickChart'a iletilir — orada soluk/gölgeli çizilir.
   final int paddingCandleCount;
   final List<Widget> leadingActions;
+  // Sonuç geldiğinde hero grafiğin HEMEN üstüne eklenecek isteğe bağlı bir
+  // widget (ör. HomeScreen'in bento KPI karoları, bkz. widgets/bento_kpi_row
+  // .dart) — null ise (TrackingScreen'in bugünkü davranışı) hiçbir şey
+  // değişmez. Bu blok kendi içinde koşulsuz eklenir; sadece result != null
+  // olduğunda görünür olması çağıranın sorumluluğu (bkz. HomeScreen'de
+  // "result?.candles.isNotEmpty == true" kontrolü).
+  final Widget? resultHeader;
 
   const ChartResultSection({
     super.key,
@@ -47,6 +54,7 @@ class ChartResultSection extends StatelessWidget {
     required this.result,
     this.paddingCandleCount = 0,
     this.leadingActions = const [],
+    this.resultHeader,
   });
 
   @override
@@ -103,6 +111,7 @@ class ChartResultSection extends StatelessWidget {
             child: Text(error!, style: const TextStyle(color: AppColors.slate100)),
           ),
         if (result != null) ...[
+          if (resultHeader != null) ...[resultHeader!, const SizedBox(height: 16)],
           CandlestickChart(result: result!, paddingCandleCount: paddingCandleCount),
           const SizedBox(height: 16),
           CandleTable(result: result!),

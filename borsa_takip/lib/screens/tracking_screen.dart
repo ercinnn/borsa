@@ -6,14 +6,17 @@ import '../models/interval.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../utils/candle_padding.dart';
+import '../widgets/bento_kpi_row.dart';
 import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
+import '../widgets/glass_card.dart';
 
 // bkz. home_screen.dart'taki aynı isimli sabitin doc yorumu — burada
-// TrackingScreen'in kendi "chrome"u: sayfa padding'i (16×2) + CandlestickChart
-// GlassCard'ı (12×2) + fiyat ekseni (ChartResultSection burada ayrıca bir
-// GlassCard'a sarılmıyor, HomeScreen'den farklı olarak).
-const _chartChromeWidth = 32 + 24;
+// TrackingScreen'in kendi "chrome"u: sayfa padding'i (16×2) + bu ekranın
+// ChartResultSection'ı saran GlassCard'ı (24×2, HomeScreen'in "Zaman
+// Aralığı" kartıyla aynı görsel çerçeveleme — bkz. build() aşağıda) +
+// CandlestickChart'ın kendi GlassCard'ı (12×2) + fiyat ekseni.
+const _chartChromeWidth = 32 + 48 + 24;
 
 class TrackingScreen extends StatefulWidget {
   // Favoriler sekmesinden takip ikonuna basılınca RootShell bu ikisini
@@ -201,37 +204,49 @@ class _TrackingScreenState extends State<TrackingScreen> {
           const SizedBox(height: 12),
           if (_loadingPersisted)
             const Center(child: CircularProgressIndicator())
-          else ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  _selectedSymbol == null
-                      ? 'Henüz takip edilen bir sembol yok.'
-                      : 'Takip edilen: ${_selectedSymbol!.symbol}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
+          else
+            // HomeScreen'in "Zaman Aralığı" kartıyla aynı çerçeveleme —
+            // önceden burada ChartResultSection çıplak duruyordu, iki
+            // sekme arasında tutarsız bir görünüme yol açıyordu.
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        _selectedSymbol == null
+                            ? 'Henüz takip edilen bir sembol yok.'
+                            : 'Takip edilen: ${_selectedSymbol!.symbol}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  ChartResultSection(
+                    intervals: ChartInterval.tracking,
+                    selectedInterval: _interval,
+                    onSelectInterval: _selectInterval,
+                    dateRange: _dateRange,
+                    dateFormat: _dateFormat,
+                    onPickDateRange: _pickDateRange,
+                    fetchLabel: 'Yenile',
+                    fetchIcon: Icons.refresh,
+                    onFetch: _selectedSymbol == null || _loading ? null : _fetch,
+                    loading: _loading,
+                    error: _error,
+                    result: _result,
+                    paddingCandleCount: _paddingCandleCount,
+                    resultHeader: _result == null || _result!.candles.isEmpty
+                        ? null
+                        : BentoKpiRow(result: _result!),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
-            ChartResultSection(
-              intervals: ChartInterval.tracking,
-              selectedInterval: _interval,
-              onSelectInterval: _selectInterval,
-              dateRange: _dateRange,
-              dateFormat: _dateFormat,
-              onPickDateRange: _pickDateRange,
-              fetchLabel: 'Yenile',
-              fetchIcon: Icons.refresh,
-              onFetch: _selectedSymbol == null || _loading ? null : _fetch,
-              loading: _loading,
-              error: _error,
-              result: _result,
-              paddingCandleCount: _paddingCandleCount,
-            ),
-          ],
         ],
       ),
     );

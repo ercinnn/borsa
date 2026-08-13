@@ -7,6 +7,7 @@ import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../widgets/comparison_chart.dart';
+import '../widgets/glass_card.dart';
 import '../widgets/gradient_button.dart';
 import '../widgets/symbol_search_field.dart';
 
@@ -51,7 +52,17 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
       );
       return;
     }
-    setState(() => _symbols.add(symbol));
+    setState(() {
+      _symbols.add(symbol);
+      // _removeSymbol'daki aynı sıfırlama burada da gerekli: _results
+      // (dolayısıyla ComparisonChart'a giden alignedSeries) son fetch
+      // anındaki sembol sayısına göre boyutlanmış — sembol eklendikten
+      // sonra yeniden "Karşılaştır"a basılmadan eski _results ile
+      // gösterilmeye çalışılırsa ComparisonChart'ın legend döngüsü
+      // (symbols.length'e göre) pctSeries'te (eski, daha kısa uzunlukta)
+      // aralık dışı indekse erişip RangeError fırlatıyordu.
+      _results = null;
+    });
   }
 
   void _removeSymbol(MarketSymbol symbol) {
@@ -123,59 +134,68 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
-          SymbolSearchField(api: _api, onSelect: _addSymbol),
-          const SizedBox(height: 12),
-          if (_symbols.isEmpty)
-            Text('Karşılaştırmak için en az 2 sembol ekle.',
-                style: Theme.of(context).textTheme.bodySmall)
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          // Diğer kontrol panelli sekmelerle (Grafik/Takip/Backtest) aynı
+          // GlassCard çerçevelemesi — önceden bu bölüm çıplak duruyordu.
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var i = 0; i < _symbols.length; i++)
-                  _SymbolChip(
-                    symbol: _symbols[i],
-                    color: comparisonLineColors[i % comparisonLineColors.length],
-                    onRemove: () => _removeSymbol(_symbols[i]),
+                SymbolSearchField(api: _api, onSelect: _addSymbol),
+                const SizedBox(height: 12),
+                if (_symbols.isEmpty)
+                  Text('Karşılaştırmak için en az 2 sembol ekle.',
+                      style: Theme.of(context).textTheme.bodySmall)
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var i = 0; i < _symbols.length; i++)
+                        _SymbolChip(
+                          symbol: _symbols[i],
+                          color: comparisonLineColors[i % comparisonLineColors.length],
+                          onRemove: () => _removeSymbol(_symbols[i]),
+                        ),
+                    ],
                   ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final interval in ChartInterval.longTerm)
+                      ChoiceChip(
+                        label: Text(interval.label),
+                        selected: _interval == interval,
+                        onSelected: (_) => setState(() => _interval = interval),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _pickDateRange,
+                      icon: const Icon(Icons.date_range),
+                      label: Text(
+                        _dateRange == null
+                            ? 'Tarih aralığı seç'
+                            : '${_dateFormat.format(_dateRange!.start)} - '
+                                '${_dateFormat.format(_dateRange!.end)}',
+                      ),
+                    ),
+                    GradientButton(
+                      onPressed: _symbols.length < 2 || _loading ? null : _fetch,
+                      icon: const Icon(Icons.show_chart),
+                      label: 'Karşılaştır',
+                    ),
+                  ],
+                ),
               ],
             ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final interval in ChartInterval.longTerm)
-                ChoiceChip(
-                  label: Text(interval.label),
-                  selected: _interval == interval,
-                  onSelected: (_) => setState(() => _interval = interval),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _pickDateRange,
-                icon: const Icon(Icons.date_range),
-                label: Text(
-                  _dateRange == null
-                      ? 'Tarih aralığı seç'
-                      : '${_dateFormat.format(_dateRange!.start)} - '
-                          '${_dateFormat.format(_dateRange!.end)}',
-                ),
-              ),
-              GradientButton(
-                onPressed: _symbols.length < 2 || _loading ? null : _fetch,
-                icon: const Icon(Icons.show_chart),
-                label: 'Karşılaştır',
-              ),
-            ],
           ),
           const SizedBox(height: 24),
           if (_loading) const Center(child: CircularProgressIndicator()),
