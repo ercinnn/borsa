@@ -4,12 +4,14 @@ import 'package:intl/intl.dart';
 import '../models/candle.dart';
 import '../models/forecast.dart';
 import '../models/interval.dart';
+import '../models/pattern_match.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../utils/candle_padding.dart';
 import '../utils/forecast_color.dart';
 import '../utils/forecast_engine.dart';
+import '../utils/pattern_matcher.dart';
 import '../widgets/bento_kpi_row.dart';
 import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
@@ -34,6 +36,14 @@ const _chartChromeWidth = 48 + 48 + 24;
 // altında/üstünde farklı bir genişlik varsaymalı.
 const _bentoBreakpoint = 900.0;
 const _bentoGap = 24.0;
+
+// "Tarihsel Benzerlik" (Pattern Matching / DTW) özelliğinin pencere boyu —
+// hem geçmişte aranan desenin hem de geleceğe izdüşürülen barların uzunluğu
+// (bkz. utils/pattern_matcher.dart findHistoricalPatterns). Sabit tutuluyor
+// (mevcut grafikteki mum sayısına göre değil) çünkü spec açıkça "30 bar"
+// diyor; CandlestickChart'ın "bugünü ortala" kuralı yine de bozulmuyor,
+// zira o kural sadece sağ uzantının uzunluğuna bakıyor, 30'a özel değil.
+const _patternWindowLength = 30;
 
 class HomeScreen extends StatefulWidget {
   // Bildirimler sekmesinden bir sembole tıklanınca RootShell bu ikisini
@@ -102,6 +112,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // fetch (sembol/aralık/interval değişikliği) her zaman eskiyi geçersiz
   // kılar, bkz. _fetch()'in başındaki reset.
   ForecastResult? _forecast;
+
+  // "Tarihsel Benzerlik" — bkz. _toggleHistoricalPatternMatch. _forecast'la
+  // aynı anda dolu olmaz (ikisi de tek bir "sağ uzantı" konseptini paylaşır,
+  // bkz. CandlestickChart._hasRightExtension); biri seçilince diğeri temizlenir.
+  PatternMatchResult? _patternMatch;
+  bool _patternMatchLoading = false;
 
   int _handledRequestId = 0;
 
@@ -173,8 +189,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
       _result = null;
       _paddingCandleCount = 0;
-      // Eski sonuca ait tahmin yeni veriyle anlamsız kalır.
+      // Eski sonuca ait tahmin/desen eşleşmesi yeni veriyle anlamsız kalır.
       _forecast = null;
+      _patternMatch = null;
     });
 
     try {
@@ -271,6 +288,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     setState(() {
+      // Tarihsel Benzerlik'le aynı anda aktif olmaz (bkz. _patternMatch
+      // doc yorumu) — ikisi de aynı "sağ uzantı" konseptini paylaşıyor.
+      _patternMatch = null;
       _forecast = ForecastResult(
         model: model,
         prices: median,
@@ -279,6 +299,61 @@ class _HomeScreenState extends State<HomeScreen> {
         periods: generateForecastPeriods(_interval, steps),
       );
     });
+  }
+
+  /// "Tarihsel Benzerlik" butonuna basıldığında çağrılır — zaten bir sonuç
+  /// gösteriliyorsa kapatır (varsayılan görünüme dönüş, tıpkı
+  /// _toggleForecast gibi); yoksa sembolün DateTime(2000)'den bugüne kadar
+  /// TÜM geçmişini (mevcut grafikte gösterilenle sınırlı değil — bkz.
+  /// spec'in "tüm geçmiş veride" isteği) `_interval`'da ayrıca çeker ve
+  /// `findHistoricalPatterns` ile DTW eşleştirmesi yapar. Bu yüzden
+  /// mevcut grafiğin `_result`'ından bağımsız bir API çağrısı — sadece
+  /// buton tıklandığında (otomatik değil), zira potansiyel olarak büyük bir
+  /// istek.
+  Future<void> _toggleHistoricalPatternMatch() async {
+    if (_patternMatch != null) {
+      setState(() => _patternMatch = null);
+      return;
+    }
+    final symbol = _selectedSymbol;
+    if (symbol == null || _result == null || _result!.candles.isEmpty) return;
+
+    setState(() => _patternMatchLoading = true);
+    try {
+      final history = await _api.candles(
+        symbol: symbol.symbol,
+        start: DateTime(2000),
+        end: DateTime.now(),
+        interval: _interval,
+      );
+      final matches = findHistoricalPatterns(
+        history.candles,
+        windowLength: _patternWindowLength,
+      );
+      if (!mounted) return;
+      if (matches == null || matches.isEmpty) {
+        setState(() => _patternMatchLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('%80 ve üzeri benzerlikte bir geçmiş dönem bulunamadı.'),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        // GBM/OU/Trend'le aynı anda aktif olmaz.
+        _forecast = null;
+        _patternMatch = PatternMatchResult(
+          matches: matches,
+          periods: generateForecastPeriods(_interval, _patternWindowLength),
+        );
+        _patternMatchLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _patternMatchLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   /// "i" ikonuna basıldığında açılan, modelin ne yaptığını sıradan dille
@@ -361,6 +436,84 @@ class _HomeScreenState extends State<HomeScreen> {
             label: const Text('Temizle'),
             onPressed: () => setState(() => _forecast = null),
           ),
+        Tooltip(
+          message: 'Geçmişte, son $_patternWindowLength barlık fiyat hareketine DTW ile '
+              'en çok benzeyen dönemleri bulup geleceğe izdüşürür',
+          child: ChoiceChip(
+            avatar: _patternMatchLoading
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.history, size: 16),
+            label: const Text('Tarihsel Benzerlik'),
+            selected: _patternMatch != null,
+            selectedColor: AppColors.slate100.withValues(alpha: 0.2),
+            onSelected: _patternMatchLoading ? null : (_) => _toggleHistoricalPatternMatch(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// "Tarihsel Benzerlik" aktifken grafiğin üstünde gösterilen, spec'in
+  /// "En Benzer Dönem: [Tarih/Yıl] (Korelasyon: %89)" bilgi kartı isteğinin
+  /// karşılığı — üç eşleşme birden bulunduğundan tek satır yerine üçü de
+  /// listelenir, her biri grafikteki hayalet çizgisiyle aynı renkte
+  /// noktayla eşleştirilir (bkz. ghostLineColor, candlestick_chart.dart'taki
+  /// aynı renklendirme). "Korelasyon" yerine "Benzerlik" deniyor — skor
+  /// DTW mesafesinden türetildiğinden (bkz. pattern_matcher.dart), klasik
+  /// Pearson korelasyon katsayısıyla karıştırılmasın diye.
+  Widget _buildPatternMatchCard() {
+    final result = _patternMatch;
+    if (result == null) return const SizedBox.shrink();
+    return GlassCard(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Tarihsel Benzerlik Sonuçları'.toUpperCase(),
+              style: Theme.of(context).textTheme.labelSmall),
+          for (var i = 0; i < result.matches.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration:
+                        BoxDecoration(color: ghostLineColor(i), shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'En Benzer Dönem ${i + 1}: ${result.matches[i].periodLabel}',
+                      style: const TextStyle(color: AppColors.slate100),
+                    ),
+                  ),
+                  Text(
+                    'Benzerlik: %${result.matches[i].similarityPercent.toStringAsFixed(0)}',
+                    style: TextStyle(color: ghostLineColor(i), fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChartOverlayControls() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildForecastBar(),
+        if (_patternMatch != null) ...[
+          const SizedBox(height: 12),
+          _buildPatternMatchCard(),
+        ],
       ],
     );
   }
@@ -392,8 +545,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 : BentoKpiRow(result: _result!),
             forecastControls: _result == null || _result!.candles.isEmpty
                 ? null
-                : _buildForecastBar(),
+                : _buildChartOverlayControls(),
             forecast: _forecast,
+            patternMatch: _patternMatch,
             leadingActions: [
               if (_selectedSymbol != null) ...[
                 Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/candle.dart';
 import '../models/forecast.dart';
 import '../models/interval.dart';
+import '../models/pattern_match.dart';
 import '../theme/app_colors.dart';
 import 'candle_table.dart';
 import 'candlestick_chart.dart';
@@ -46,6 +47,10 @@ class ChartResultSection extends StatelessWidget {
   // Seçili tahmin (varsa) doğrudan CandlestickChart'a iletilir — bkz.
   // CandlestickChart.forecast doc yorumu.
   final ForecastResult? forecast;
+  // "Tarihsel Benzerlik" sonucu (varsa) — bkz. CandlestickChart.patternMatch
+  // doc yorumu. [forecast] ile aynı anda dolu olmaz (HomeScreen karşılıklı
+  // dışlar).
+  final PatternMatchResult? patternMatch;
 
   const ChartResultSection({
     super.key,
@@ -66,6 +71,7 @@ class ChartResultSection extends StatelessWidget {
     this.resultHeader,
     this.forecastControls,
     this.forecast,
+    this.patternMatch,
   });
 
   @override
@@ -128,6 +134,7 @@ class ChartResultSection extends StatelessWidget {
             result: result!,
             paddingCandleCount: paddingCandleCount,
             forecast: forecast,
+            patternMatch: patternMatch,
           ),
           const SizedBox(height: 16),
           CandleTable(result: result!),

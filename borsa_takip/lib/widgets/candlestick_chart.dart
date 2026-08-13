@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/candle.dart';
 import '../models/forecast.dart';
+import '../models/pattern_match.dart';
 import '../theme/app_colors.dart';
 import '../utils/forecast_color.dart';
 import '../utils/price_format.dart';
@@ -34,6 +35,13 @@ class CandlestickChart extends StatefulWidget {
   // bir çizgiyle eklenecek tahmin — null ise (TrackingScreen'in bugünkü
   // davranışı) hiçbir şey değişmez.
   final ForecastResult? forecast;
+  // "Tarihsel Benzerlik" butonuna basıldığında (bkz.
+  // HomeScreen._toggleHistoricalPatternMatch) geçmişten bulunan en fazla 3
+  // benzer dönemin geleceğe izdüşümü — [forecast] ile aynı anda aktif
+  // olmaz (HomeScreen ikisini karşılıklı dışlar), ama burada da ikisi
+  // birlikte gelirse [forecast] önceliklidir (bkz. build()'teki
+  // rightExtensionLength).
+  final PatternMatchResult? patternMatch;
 
   // `CandlestickChart.maxSlotWidth`, çağıran ekranların "bu aralık+interval yeterli mum
   // üretecek mi" hesabında (bkz. candle_padding.dart) da kullanabilmesi
@@ -46,6 +54,7 @@ class CandlestickChart extends StatefulWidget {
     required this.result,
     this.paddingCandleCount = 0,
     this.forecast,
+    this.patternMatch,
   });
 
   @override
@@ -101,19 +110,27 @@ class _CandlestickChartState extends State<CandlestickChart> {
     super.didUpdateWidget(oldWidget);
     final resultChanged = oldWidget.result != widget.result;
     final forecastChanged = oldWidget.forecast != widget.forecast;
+    final patternMatchChanged = oldWidget.patternMatch != widget.patternMatch;
     // Yeni sembol/aralık verisi geldiğinde eski crosshair konumu anlamsız
     // kalacağından kapatılıyor.
     if (resultChanged) {
       _hoverIndex = null;
     }
-    if (resultChanged || forecastChanged) {
+    if (resultChanged || forecastChanged || patternMatchChanged) {
       _computeRanges();
-      // Bir tahmin butonuna basıldığında/tahmin temizlendiğinde viewport'u
-      // yeniden konumlandır (bkz. _applyViewport doc yorumu) — layout henüz
-      // bu frame'de gerçekleşmediğinden bir sonraki frame'e ertelenir.
+      // Bir tahmin butonuna/Tarihsel Benzerlik'e basıldığında ya da
+      // temizlendiğinde viewport'u yeniden konumlandır (bkz. _applyViewport
+      // doc yorumu) — layout henüz bu frame'de gerçekleşmediğinden bir
+      // sonraki frame'e ertelenir.
       WidgetsBinding.instance.addPostFrameCallback((_) => _applyViewport());
     }
   }
+
+  // Sağ tarafa "geleceğe" bir uzantı (tahmin çizgisi/konisi YA DA Tarihsel
+  // Benzerlik hayalet çizgileri) çizilip çizilmediği — viewport ortalama
+  // ve crosshair/tıklama kurallarının ikisinde de aynı koşul kullanılıyor.
+  bool get _hasRightExtension =>
+      widget.forecast != null || (widget.patternMatch?.matches.isNotEmpty ?? false);
 
   /// X ekseni (yatay kaydırma) konumlandırma kuralı: tahmin AKTİFSE "bugün"
   /// (son gerçek mum) viewport'un tam ortasına gelecek şekilde kaydırılır
@@ -130,7 +147,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final position = _scrollController.position;
     final maxExtent = position.maxScrollExtent;
     final double target;
-    if (widget.forecast != null) {
+    if (_hasRightExtension) {
       final boundaryX = _lastHistoricalCount * slotWidth;
       target = (boundaryX - position.viewportDimension / 2).clamp(0.0, maxExtent);
     } else {
@@ -154,15 +171,18 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final candles = widget.result.candles;
     if (candles.isEmpty) return;
     // Tahmin fiyatları (özellikle GBM/OU'nun Olasılık Konisi'ndeki %95/%5
-    // sınırları) geçmiş yüksek/düşük aralığının dışına çıkabilir — fiyat
-    // ekseni ve grid buna göre genişlemezse koni panelin üstünden/altından
-    // taşar.
+    // sınırları) ve Tarihsel Benzerlik'in hayalet çizgileri geçmiş yüksek/
+    // düşük aralığının dışına çıkabilir — fiyat ekseni ve grid buna göre
+    // genişlemezse taşarlar.
     final forecastPrices = widget.forecast?.prices ?? const <double>[];
     final forecastUpper = widget.forecast?.upperBand ?? const <double>[];
     final forecastLower = widget.forecast?.lowerBand ?? const <double>[];
-    final rawMin = [...candles.map((c) => c.low), ...forecastPrices, ...forecastLower]
+    final ghostPrices = <double>[
+      for (final m in widget.patternMatch?.matches ?? const <PatternMatch>[]) ...m.projectedPrices,
+    ];
+    final rawMin = [...candles.map((c) => c.low), ...forecastPrices, ...forecastLower, ...ghostPrices]
         .reduce((a, b) => a < b ? a : b);
-    final rawMax = [...candles.map((c) => c.high), ...forecastPrices, ...forecastUpper]
+    final rawMax = [...candles.map((c) => c.high), ...forecastPrices, ...forecastUpper, ...ghostPrices]
         .reduce((a, b) => a > b ? a : b);
     final pad = (rawMax - rawMin) * 0.08 == 0 ? 1.0 : (rawMax - rawMin) * 0.08;
     _minPrice = rawMin - pad;
@@ -204,7 +224,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
   void _handleTap(Offset localPosition, double slotWidth) {
     final historicalCount = widget.result.candles.length;
     final idx = (localPosition.dx / slotWidth).floor();
-    if (widget.forecast != null && idx >= historicalCount) {
+    if (_hasRightExtension && idx >= historicalCount) {
       _applyViewport();
       return;
     }
@@ -232,6 +252,19 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final forecastPeriods = forecast?.periods ?? const <String>[];
     final forecastColor = forecast == null ? null : forecastModelColor(forecast.model);
     final forecastHasCone = forecastUpper.isNotEmpty && forecastLower.isNotEmpty;
+    // Tarihsel Benzerlik (bkz. HomeScreen._toggleHistoricalPatternMatch) —
+    // forecast ile aynı anda aktif olmaz (HomeScreen karşılıklı dışlar),
+    // o yüzden "sağ uzantı" uzunluğu ikisinden hangisi doluysa ondan gelir.
+    final ghostSeries = <List<double>>[
+      for (final m in widget.patternMatch?.matches ?? const <PatternMatch>[]) m.projectedPrices,
+    ];
+    final ghostPeriods = widget.patternMatch?.periods ?? const <String>[];
+    final rightExtensionPeriods = forecastPrices.isNotEmpty
+        ? forecastPeriods
+        : (ghostSeries.isNotEmpty ? ghostPeriods : const <String>[]);
+    final rightExtensionLength = forecastPrices.isNotEmpty
+        ? forecastPrices.length
+        : (ghostSeries.isNotEmpty ? ghostSeries.first.length : 0);
 
     return GlassCard(
       padding: const EdgeInsets.all(12),
@@ -260,6 +293,14 @@ class _CandlestickChartState extends State<CandlestickChart> {
                   color: forecastColor!,
                   label: 'Tahmin: ${forecast.model.shortLabel}'
                       '${forecastHasCone ? ' (Olasılık Konisi)' : ''}',
+                ),
+                const SizedBox(width: 10),
+              ],
+              for (var i = 0; i < ghostSeries.length; i++) ...[
+                _LegendDot(
+                  color: ghostLineColor(i),
+                  label: 'Benzer Dönem ${i + 1} '
+                      '(%${widget.patternMatch!.matches[i].similarityPercent.toStringAsFixed(0)})',
                 ),
                 const SizedBox(width: 10),
               ],
@@ -318,14 +359,15 @@ class _CandlestickChartState extends State<CandlestickChart> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    // Tahmin aktifse toplam slot sayısı geçmiş + tahmin
-                    // adımlarının toplamı olur; bu, "bugün"ün tam ortada
-                    // görünmesini sağlayan geometrik temel — geçmiş N mum +
-                    // gelecek N mum eşit genişlikte bölündüğünde sınır
-                    // doğal olarak %50 noktasına düşer (bkz. _applyViewport,
-                    // içerik viewport'tan geniş olduğunda ek olarak kaydırma
-                    // ile de merkezlenir).
-                    final totalSlots = candles.length + forecastPrices.length;
+                    // Tahmin (ya da Tarihsel Benzerlik) aktifse toplam slot
+                    // sayısı geçmiş + sağ uzantı adımlarının toplamı olur;
+                    // bu, "bugün"ün tam ortada görünmesini sağlayan
+                    // geometrik temel — geçmiş N mum + gelecek N mum eşit
+                    // genişlikte bölündüğünde sınır doğal olarak %50
+                    // noktasına düşer (bkz. _applyViewport, içerik
+                    // viewport'tan geniş olduğunda ek olarak kaydırma ile de
+                    // merkezlenir).
+                    final totalSlots = candles.length + rightExtensionLength;
                     // Tüm mumları mevcut genişliğe sığdırmak için mum
                     // başına düşen genişlik ekrana göre daraltılıyor.
                     final slotWidth = (constraints.maxWidth / totalSlots)
@@ -379,6 +421,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                       forecastLower: forecastLower,
                                       forecastLabel: forecast?.model.shortLabel,
                                       forecastColor: forecastColor,
+                                      ghostSeries: ghostSeries,
                                     ),
                                     size: Size(contentWidth, _chartHeight),
                                   ),
@@ -439,7 +482,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                   child: _PeriodLabels(
                                     periods: [
                                       for (final c in candles) c.period,
-                                      ...forecastPeriods,
+                                      ...rightExtensionPeriods,
                                     ],
                                     slotWidth: slotWidth,
                                     labelEvery: labelEvery,
@@ -754,6 +797,10 @@ class _CandlestickPainter extends CustomPainter {
   final List<double> forecastLower;
   final String? forecastLabel;
   final Color? forecastColor;
+  // "Tarihsel Benzerlik" için en fazla 3 hayalet çizgi (bkz.
+  // CandlestickChart.patternMatch) — [forecastPrices] doluysa bu göz ardı
+  // edilir (HomeScreen ikisini karşılıklı dışlar, bkz. _hasRightExtension).
+  final List<List<double>> ghostSeries;
 
   _CandlestickPainter({
     required this.candles,
@@ -771,7 +818,11 @@ class _CandlestickPainter extends CustomPainter {
     this.forecastLower = const [],
     this.forecastLabel,
     this.forecastColor,
+    this.ghostSeries = const [],
   });
+
+  int get _rightExtensionLength =>
+      forecastPrices.isNotEmpty ? forecastPrices.length : (ghostSeries.isNotEmpty ? ghostSeries.first.length : 0);
 
   double _priceToY(double price, double height) {
     final range = maxPrice - minPrice;
@@ -925,6 +976,41 @@ class _CandlestickPainter extends CustomPainter {
     }
   }
 
+  /// "Tarihsel Benzerlik" sonucundaki en fazla 3 hayalet çizgi — her biri
+  /// [ghostLineColor] ile ayrı ama soluk (opacity ~0.5) renklendirilmiş,
+  /// ince kesikli bir çizgi; koni/tahminden farklı olarak dolgu YOK (spec
+  /// bunları "silik/saydam" istiyor, bir "güven bandı" değiller). Aynı
+  /// [_forecastSeriesPath]/[_strokeDashed] altyapısı kullanılıyor —
+  /// geometrik olarak tahmin çizgileriyle birebir aynı (bugünün kapanışından
+  /// başlayıp candles.length'in hemen sağındaki slotlara çizilir).
+  void _drawGhostLines(Canvas canvas, Size size) {
+    if (ghostSeries.isEmpty || candles.isEmpty) return;
+    final boundaryX = candles.length * slotWidth;
+
+    final dividerPaint = Paint()
+      ..color = AppColors.slate100.withValues(alpha: 0.35)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(boundaryX, 0), Offset(boundaryX, size.height), dividerPaint);
+
+    for (var i = 0; i < ghostSeries.length; i++) {
+      final paint = Paint()
+        ..color = ghostLineColor(i).withValues(alpha: 0.55)
+        ..strokeWidth = 1.4
+        ..style = PaintingStyle.stroke
+        ..strokeJoin = StrokeJoin.round;
+      _strokeDashed(canvas, _forecastSeriesPath(size, ghostSeries[i]), paint, dashWidth: 4, dashGap: 5);
+    }
+
+    final tp = TextPainter(
+      text: TextSpan(
+        text: 'Tarihsel Benzerlik →',
+        style: TextStyle(fontSize: 10, color: AppColors.slate100, fontWeight: FontWeight.w600),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset((boundaryX + 6).clamp(0.0, size.width - tp.width), 4));
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     _paintPaddingBand(canvas, size, slotWidth, paddingCandleCount);
@@ -943,7 +1029,7 @@ class _CandlestickPainter extends CustomPainter {
     final dateGridPaint = Paint()
       ..color = AppColors.slate800.withValues(alpha: 0.35)
       ..strokeWidth = 1;
-    for (var i = 0; i < candles.length + forecastPrices.length; i += labelEvery) {
+    for (var i = 0; i < candles.length + _rightExtensionLength; i += labelEvery) {
       final x = i * slotWidth;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), dateGridPaint);
     }
@@ -984,6 +1070,7 @@ class _CandlestickPainter extends CustomPainter {
     _drawOverlayLine(canvas, size, ema, AppColors.cyan500);
     _drawPaddingLabel(canvas, size);
     _drawForecastLines(canvas, size);
+    _drawGhostLines(canvas, size);
 
     if (highlightIndex != null) {
       final idx = highlightIndex!.clamp(0, candles.length - 1);
@@ -1025,7 +1112,8 @@ class _CandlestickPainter extends CustomPainter {
         oldDelegate.forecastUpper != forecastUpper ||
         oldDelegate.forecastLower != forecastLower ||
         oldDelegate.forecastLabel != forecastLabel ||
-        oldDelegate.forecastColor != forecastColor;
+        oldDelegate.forecastColor != forecastColor ||
+        oldDelegate.ghostSeries != ghostSeries;
   }
 }
 
