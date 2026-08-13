@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/candle.dart';
+import '../models/forecast.dart';
 import '../models/interval.dart';
 import '../theme/app_colors.dart';
 import 'candle_table.dart';
@@ -37,6 +38,14 @@ class ChartResultSection extends StatelessWidget {
   // olduğunda görünür olması çağıranın sorumluluğu (bkz. HomeScreen'de
   // "result?.candles.isNotEmpty == true" kontrolü).
   final Widget? resultHeader;
+  // HomeScreen'in [GBM]/[OU]/[Trend] model seçim butonları (bkz.
+  // home_screen.dart _buildForecastBar) — resultHeader'la aynı desende,
+  // sadece grafiğin biraz daha üstünde (kontrol alanına daha yakın).
+  // TrackingScreen bunu geçmediğinden orada hiçbir şey değişmez.
+  final Widget? forecastControls;
+  // Seçili tahmin (varsa) doğrudan CandlestickChart'a iletilir — bkz.
+  // CandlestickChart.forecast doc yorumu.
+  final ForecastResult? forecast;
 
   const ChartResultSection({
     super.key,
@@ -55,6 +64,8 @@ class ChartResultSection extends StatelessWidget {
     this.paddingCandleCount = 0,
     this.leadingActions = const [],
     this.resultHeader,
+    this.forecastControls,
+    this.forecast,
   });
 
   @override
@@ -111,8 +122,13 @@ class ChartResultSection extends StatelessWidget {
             child: Text(error!, style: const TextStyle(color: AppColors.slate100)),
           ),
         if (result != null) ...[
+          if (forecastControls != null) ...[forecastControls!, const SizedBox(height: 12)],
           if (resultHeader != null) ...[resultHeader!, const SizedBox(height: 16)],
-          CandlestickChart(result: result!, paddingCandleCount: paddingCandleCount),
+          CandlestickChart(
+            result: result!,
+            paddingCandleCount: paddingCandleCount,
+            forecast: forecast,
+          ),
           const SizedBox(height: 16),
           CandleTable(result: result!),
         ],

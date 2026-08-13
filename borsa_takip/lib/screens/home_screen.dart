@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/candle.dart';
+import '../models/forecast.dart';
 import '../models/interval.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
 import '../utils/candle_padding.dart';
+import '../utils/forecast_color.dart';
+import '../utils/forecast_engine.dart';
 import '../widgets/bento_kpi_row.dart';
 import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
@@ -95,6 +98,11 @@ class _HomeScreenState extends State<HomeScreen> {
   CandleResult? _result;
   int _paddingCandleCount = 0;
 
+  // [GBM]/[OU]/[Trend] tahmin butonları — bkz. _toggleForecast. Yeni bir
+  // fetch (sembol/aralık/interval değişikliği) her zaman eskiyi geçersiz
+  // kılar, bkz. _fetch()'in başındaki reset.
+  ForecastResult? _forecast;
+
   int _handledRequestId = 0;
 
   int _estimateMinCandles(BuildContext context) {
@@ -165,6 +173,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
       _result = null;
       _paddingCandleCount = 0;
+      // Eski sonuca ait tahmin yeni veriyle anlamsız kalır.
+      _forecast = null;
     });
 
     try {
@@ -218,6 +228,70 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// [GBM]/[OU]/[Trend] butonlarından birine basıldığında çağrılır. Zaten
+  /// seçili olan modele tekrar basmak tahmini kapatır (varsayılan görünüme
+  /// dönüş — bkz. CandlestickChart._applyViewport); başka bir modele basmak
+  /// önceki tahmini yenisiyle değiştirir. Adım sayısı ("N") mevcut
+  /// grafikteki geçmiş mum sayısı kadar — bu hem "geçmişte görünen bar
+  /// sayısı kadar" isteğini karşılıyor hem de CandlestickChart'ın "bugünü
+  /// tam ortala" geometrisinin temeli (geçmiş N + gelecek N = sınır tam
+  /// %50'de).
+  void _toggleForecast(ForecastModelType model) {
+    if (_forecast?.model == model) {
+      setState(() => _forecast = null);
+      return;
+    }
+    final candles = _result?.candles ?? const <Candle>[];
+    if (candles.isEmpty) return;
+    final closes = [for (final c in candles) c.close];
+    final steps = candles.length;
+    final prices = switch (model) {
+      ForecastModelType.gbm => gbmForecast(closes, steps),
+      ForecastModelType.ou => ouForecast(closes, steps),
+      ForecastModelType.trend => trendForecast(closes, steps),
+    };
+    if (prices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tahmin için yeterli geçmiş veri yok.')),
+      );
+      return;
+    }
+    setState(() {
+      _forecast = ForecastResult(
+        model: model,
+        prices: prices,
+        periods: generateForecastPeriods(_interval, steps),
+      );
+    });
+  }
+
+  Widget _buildForecastBar() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('Tahmin:', style: Theme.of(context).textTheme.labelSmall),
+        for (final model in ForecastModelType.values)
+          Tooltip(
+            message: model.description,
+            child: ChoiceChip(
+              label: Text(model.shortLabel),
+              selected: _forecast?.model == model,
+              selectedColor: forecastModelColor(model).withValues(alpha: 0.25),
+              onSelected: (_) => _toggleForecast(model),
+            ),
+          ),
+        if (_forecast != null)
+          ActionChip(
+            avatar: const Icon(Icons.close, size: 16),
+            label: const Text('Temizle'),
+            onPressed: () => setState(() => _forecast = null),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final heroColumn = GlassCard(
@@ -243,6 +317,10 @@ class _HomeScreenState extends State<HomeScreen> {
             resultHeader: _result == null || _result!.candles.isEmpty
                 ? null
                 : BentoKpiRow(result: _result!),
+            forecastControls: _result == null || _result!.candles.isEmpty
+                ? null
+                : _buildForecastBar(),
+            forecast: _forecast,
             leadingActions: [
               if (_selectedSymbol != null) ...[
                 Chip(label: Text('Seçili: ${_selectedSymbol!.symbol}')),

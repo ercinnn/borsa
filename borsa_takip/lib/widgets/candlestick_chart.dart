@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/candle.dart';
+import '../models/forecast.dart';
 import '../theme/app_colors.dart';
+import '../utils/forecast_color.dart';
 import '../utils/price_format.dart';
 import 'glass_card.dart';
 
@@ -27,6 +29,11 @@ class CandlestickChart extends StatefulWidget {
   // yeniden veri çeker; result.candles'ın en baştaki bu kadarı kullanıcının
   // seçmediği "otomatik eklenen" geçmiş olur ve soluk/gölgeli çizilir.
   final int paddingCandleCount;
+  // Grafik ekranındaki [GBM]/[OU]/[Trend] butonlarından biri seçiliyse
+  // (bkz. HomeScreen._toggleForecast), geçmiş verinin hemen sağına kesikli
+  // bir çizgiyle eklenecek tahmin — null ise (TrackingScreen'in bugünkü
+  // davranışı) hiçbir şey değişmez.
+  final ForecastResult? forecast;
 
   // `CandlestickChart.maxSlotWidth`, çağıran ekranların "bu aralık+interval yeterli mum
   // üretecek mi" hesabında (bkz. candle_padding.dart) da kullanabilmesi
@@ -34,7 +41,12 @@ class CandlestickChart extends StatefulWidget {
   static const double maxSlotWidth = 46.0;
   static const double axisWidth = 64.0;
 
-  const CandlestickChart({super.key, required this.result, this.paddingCandleCount = 0});
+  const CandlestickChart({
+    super.key,
+    required this.result,
+    this.paddingCandleCount = 0,
+    this.forecast,
+  });
 
   @override
   State<CandlestickChart> createState() => _CandlestickChartState();
@@ -62,21 +74,73 @@ class _CandlestickChartState extends State<CandlestickChart> {
   List<double?> _sma20 = const [];
   List<double?> _ema50 = const [];
 
+  // Yatay kaydırmayı programatik olarak yönetmek (tahmin varken "bugün"ü
+  // ortala, yokken "bugün"ü en sağda tut) için — bkz. _applyViewport.
+  // slotWidth/geçmiş mum sayısı sadece build() içindeki LayoutBuilder'da
+  // bilindiğinden, o sırada burada önbelleklenip _applyViewport'un
+  // addPostFrameCallback'i tarafından okunuyor.
+  final _scrollController = ScrollController();
+  double _lastSlotWidth = 0;
+  int _lastHistoricalCount = 0;
+
   @override
   void initState() {
     super.initState();
     _computeRanges();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applyViewport());
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant CandlestickChart oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final resultChanged = oldWidget.result != widget.result;
+    final forecastChanged = oldWidget.forecast != widget.forecast;
     // Yeni sembol/aralık verisi geldiğinde eski crosshair konumu anlamsız
     // kalacağından kapatılıyor.
-    if (oldWidget.result != widget.result) {
+    if (resultChanged) {
       _hoverIndex = null;
-      _computeRanges();
     }
+    if (resultChanged || forecastChanged) {
+      _computeRanges();
+      // Bir tahmin butonuna basıldığında/tahmin temizlendiğinde viewport'u
+      // yeniden konumlandır (bkz. _applyViewport doc yorumu) — layout henüz
+      // bu frame'de gerçekleşmediğinden bir sonraki frame'e ertelenir.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _applyViewport());
+    }
+  }
+
+  /// X ekseni (yatay kaydırma) konumlandırma kuralı: tahmin AKTİFSE "bugün"
+  /// (son gerçek mum) viewport'un tam ortasına gelecek şekilde kaydırılır
+  /// (minX = bugün - görünürAralık, maxX = bugün + görünürAralık); tahmin
+  /// YOKSA (kapatıldığında/temizlendiğinde de) varsayılan görünüme, yani
+  /// "bugün en sağda" konumuna dönülür. `_lastSlotWidth`/
+  /// `_lastHistoricalCount` build()'teki LayoutBuilder'dan önbelleklenir —
+  /// bu yüzden ilk frame render olmadan (ScrollController henüz
+  /// `hasClients` değilken) çağrılırsa sessizce hiçbir şey yapmaz.
+  void _applyViewport() {
+    if (!mounted || !_scrollController.hasClients) return;
+    final slotWidth = _lastSlotWidth;
+    if (slotWidth <= 0) return;
+    final position = _scrollController.position;
+    final maxExtent = position.maxScrollExtent;
+    final double target;
+    if (widget.forecast != null) {
+      final boundaryX = _lastHistoricalCount * slotWidth;
+      target = (boundaryX - position.viewportDimension / 2).clamp(0.0, maxExtent);
+    } else {
+      target = maxExtent;
+    }
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   bool get _hasRsi => widget.result.candles.any((c) => c.rsi != null);
@@ -89,8 +153,15 @@ class _CandlestickChartState extends State<CandlestickChart> {
   void _computeRanges() {
     final candles = widget.result.candles;
     if (candles.isEmpty) return;
-    final rawMin = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
-    final rawMax = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    // Tahmin fiyatları geçmiş yüksek/düşük aralığının dışına çıkabilir
+    // (özellikle GBM/OU'nun stokastik gürültüsüyle) — fiyat ekseni ve grid
+    // buna göre genişlemezse tahmin çizgisi panelin üstünden/altından
+    // taşar.
+    final forecastPrices = widget.forecast?.prices ?? const <double>[];
+    final rawMin = [...candles.map((c) => c.low), ...forecastPrices]
+        .reduce((a, b) => a < b ? a : b);
+    final rawMax = [...candles.map((c) => c.high), ...forecastPrices]
+        .reduce((a, b) => a > b ? a : b);
     final pad = (rawMax - rawMin) * 0.08 == 0 ? 1.0 : (rawMax - rawMin) * 0.08;
     _minPrice = rawMin - pad;
     _maxPrice = rawMax + pad;
@@ -116,8 +187,26 @@ class _CandlestickChartState extends State<CandlestickChart> {
   }
 
   void _updateHover(Offset localPosition, double slotWidth, int candleCount) {
-    final idx = (localPosition.dx / slotWidth).floor().clamp(0, candleCount - 1);
+    final idx = (localPosition.dx / slotWidth).floor();
+    // Tahmin bölgesine (ya da sınırların dışına) düşen bir konum crosshair'i
+    // güncellemez — orada gerçek bir OHLC değeri yok, bkz. _handleTap'in bu
+    // bölgedeki tıklamaları "viewport'u ortala" olarak ele alması.
+    if (idx < 0 || idx >= candleCount) return;
     if (idx != _hoverIndex) setState(() => _hoverIndex = idx);
+  }
+
+  /// Tahmin bölgesine (kesikli çizginin üzerine ya da altına) yapılan bir
+  /// tıklama viewport'u "bugün ortada" konumuna kilitler (bkz.
+  /// _applyViewport) — geçmiş bölgedeki bir tıklama ise her zamanki gibi
+  /// crosshair'i günceller.
+  void _handleTap(Offset localPosition, double slotWidth) {
+    final historicalCount = widget.result.candles.length;
+    final idx = (localPosition.dx / slotWidth).floor();
+    if (widget.forecast != null && idx >= historicalCount) {
+      _applyViewport();
+      return;
+    }
+    _updateHover(localPosition, slotWidth, historicalCount);
   }
 
   @override
@@ -134,6 +223,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
     final hasSma = candles.length >= _smaPeriod;
     final hasEma = candles.length >= _emaPeriod;
     final ribbonCandle = candles[_hoverIndex ?? candles.length - 1];
+    final forecast = widget.forecast;
+    final forecastPrices = forecast?.prices ?? const <double>[];
+    final forecastPeriods = forecast?.periods ?? const <String>[];
+    final forecastColor = forecast == null ? null : forecastModelColor(forecast.model);
 
     return GlassCard(
       padding: const EdgeInsets.all(12),
@@ -155,6 +248,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
               ],
               if (hasEma) ...[
                 const _LegendDot(color: AppColors.cyan500, label: 'EMA50'),
+                const SizedBox(width: 10),
+              ],
+              if (forecast != null) ...[
+                _LegendDot(color: forecastColor!, label: 'Tahmin: ${forecast.model.shortLabel}'),
                 const SizedBox(width: 10),
               ],
               if (_hasRsi || _hasMacd)
@@ -212,22 +309,34 @@ class _CandlestickChartState extends State<CandlestickChart> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
+                    // Tahmin aktifse toplam slot sayısı geçmiş + tahmin
+                    // adımlarının toplamı olur; bu, "bugün"ün tam ortada
+                    // görünmesini sağlayan geometrik temel — geçmiş N mum +
+                    // gelecek N mum eşit genişlikte bölündüğünde sınır
+                    // doğal olarak %50 noktasına düşer (bkz. _applyViewport,
+                    // içerik viewport'tan geniş olduğunda ek olarak kaydırma
+                    // ile de merkezlenir).
+                    final totalSlots = candles.length + forecastPrices.length;
                     // Tüm mumları mevcut genişliğe sığdırmak için mum
                     // başına düşen genişlik ekrana göre daraltılıyor.
-                    final slotWidth = (constraints.maxWidth / candles.length)
+                    final slotWidth = (constraints.maxWidth / totalSlots)
                         .clamp(_minSlotWidth, CandlestickChart.maxSlotWidth);
                     final candleWidth = (slotWidth * 0.7).clamp(1.0, 20.0);
-                    final contentWidth = slotWidth * candles.length;
+                    final contentWidth = slotWidth * totalSlots;
                     // Dar mum aralıklarında her mumun altına etiket
                     // sığmayacağından, etiketler ve dikey referans
                     // çizgileri ~60px'lik gruplar halinde birleştiriliyor.
                     final labelEvery =
-                        (60 / slotWidth).ceil().clamp(1, candles.length);
+                        (60 / slotWidth).ceil().clamp(1, totalSlots);
+
+                    _lastSlotWidth = slotWidth;
+                    _lastHistoricalCount = candles.length;
 
                     void handlePointer(Offset local) =>
                         _updateHover(local, slotWidth, candles.length);
 
                     return SingleChildScrollView(
+                      controller: _scrollController,
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
                         width: contentWidth,
@@ -237,7 +346,7 @@ class _CandlestickChartState extends State<CandlestickChart> {
                           onExit: (_) => setState(() => _hoverIndex = null),
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onTapUp: (d) => handlePointer(d.localPosition),
+                            onTapUp: (d) => _handleTap(d.localPosition, slotWidth),
                             onPanDown: (d) => handlePointer(d.localPosition),
                             onPanUpdate: (d) => handlePointer(d.localPosition),
                             child: Column(
@@ -256,6 +365,9 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                       ema: hasEma ? _ema50 : const [],
                                       highlightIndex: _hoverIndex,
                                       paddingCandleCount: widget.paddingCandleCount,
+                                      forecastPrices: forecastPrices,
+                                      forecastLabel: forecast?.model.shortLabel,
+                                      forecastColor: forecastColor,
                                     ),
                                     size: Size(contentWidth, _chartHeight),
                                   ),
@@ -314,7 +426,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                 SizedBox(
                                   height: _labelHeight,
                                   child: _PeriodLabels(
-                                    candles: candles,
+                                    periods: [
+                                      for (final c in candles) c.period,
+                                      ...forecastPeriods,
+                                    ],
                                     slotWidth: slotWidth,
                                     labelEvery: labelEvery,
                                   ),
@@ -452,12 +567,14 @@ class _OhlcRibbon extends StatelessWidget {
 }
 
 class _PeriodLabels extends StatelessWidget {
-  final List<Candle> candles;
+  // Geçmiş mumların period'larıyla (varsa) tahmin period'larının
+  // birleştirilmiş hali — bkz. CandlestickChart.build()'teki çağrı.
+  final List<String> periods;
   final double slotWidth;
   final int labelEvery;
 
   const _PeriodLabels({
-    required this.candles,
+    required this.periods,
     required this.slotWidth,
     required this.labelEvery,
   });
@@ -466,9 +583,9 @@ class _PeriodLabels extends StatelessWidget {
   Widget build(BuildContext context) {
     final cells = <Widget>[];
     var i = 0;
-    while (i < candles.length) {
-      final span = (candles.length - i < labelEvery)
-          ? candles.length - i
+    while (i < periods.length) {
+      final span = (periods.length - i < labelEvery)
+          ? periods.length - i
           : labelEvery;
       cells.add(
         SizedBox(
@@ -477,7 +594,7 @@ class _PeriodLabels extends StatelessWidget {
             child: FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
-                candles[i].period,
+                periods[i],
                 style: const TextStyle(fontSize: 10, color: AppColors.slate400),
               ),
             ),
@@ -615,6 +732,12 @@ class _CandlestickPainter extends CustomPainter {
   final List<double?> ema;
   final int? highlightIndex;
   final int paddingCandleCount;
+  // Tahmin aktifse (bkz. CandlestickChart.forecast), geçmiş mumların hemen
+  // sağına çizilecek fiyat dizisi + model kısaltması/rengi — üçü de null/
+  // boşsa hiçbir şey çizilmez.
+  final List<double> forecastPrices;
+  final String? forecastLabel;
+  final Color? forecastColor;
 
   _CandlestickPainter({
     required this.candles,
@@ -627,6 +750,9 @@ class _CandlestickPainter extends CustomPainter {
     required this.ema,
     required this.highlightIndex,
     required this.paddingCandleCount,
+    this.forecastPrices = const [],
+    this.forecastLabel,
+    this.forecastColor,
   });
 
   double _priceToY(double price, double height) {
@@ -675,9 +801,76 @@ class _CandlestickPainter extends CustomPainter {
     tp.paint(canvas, Offset(left, 4));
   }
 
+  /// [_paintPaddingBand]'ın tersi: geçmişin SOLUNA değil, tahminin
+  /// (varsa) SAĞINA hafif renkli bir "tahmin kanalı" bandı çizer —
+  /// kullanıcının bu bölgenin gerçek veri olmadığını bir bakışta anlaması
+  /// için. Diğer çizimlerden önce çağrılmalı ki arka planda kalsın.
+  void _paintForecastBand(Canvas canvas, Size size) {
+    if (forecastPrices.isEmpty || forecastColor == null) return;
+    final startX = candles.length * slotWidth;
+    if (startX >= size.width) return;
+    canvas.drawRect(
+      Rect.fromLTRB(startX, 0, size.width, size.height),
+      Paint()..color = forecastColor!.withValues(alpha: 0.07),
+    );
+  }
+
+  /// Son gerçek kapanıştan başlayıp tahmin fiyatları boyunca ilerleyen
+  /// kesikli çizgi + "bugün" sınırında ince bir ayraç + model adını
+  /// gösteren küçük bir etiket. `path.computeMetrics()` ile elle
+  /// kesikli çizgi çiziliyor — Flutter'ın kendi dashed-line API'si yok ve
+  /// bu, yeni bir paket bağımlılığı eklemeden yeterli.
+  void _drawForecastLine(Canvas canvas, Size size) {
+    if (forecastPrices.isEmpty || forecastColor == null || candles.isEmpty) return;
+    final historicalCount = candles.length;
+    final boundaryX = historicalCount * slotWidth;
+
+    final dividerPaint = Paint()
+      ..color = forecastColor!.withValues(alpha: 0.5)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(boundaryX, 0), Offset(boundaryX, size.height), dividerPaint);
+
+    final path = Path()
+      ..moveTo(boundaryX - slotWidth / 2, _priceToY(candles.last.close, size.height));
+    for (var i = 0; i < forecastPrices.length; i++) {
+      final x = (historicalCount + i) * slotWidth + slotWidth / 2;
+      final y = _priceToY(forecastPrices[i], size.height);
+      path.lineTo(x, y);
+    }
+    final linePaint = Paint()
+      ..color = forecastColor!
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round;
+    const dashWidth = 6.0, dashGap = 4.0;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = distance + dashWidth;
+        canvas.drawPath(
+          metric.extractPath(distance, next.clamp(0.0, metric.length)),
+          linePaint,
+        );
+        distance = next + dashGap;
+      }
+    }
+
+    if (forecastLabel != null) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: 'Tahmin: $forecastLabel →',
+          style: TextStyle(fontSize: 10, color: forecastColor, fontWeight: FontWeight.w600),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset((boundaryX + 6).clamp(0.0, size.width - tp.width), 4));
+    }
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     _paintPaddingBand(canvas, size, slotWidth, paddingCandleCount);
+    _paintForecastBand(canvas, size);
 
     final gridPaint = Paint()
       ..color = AppColors.slate800.withValues(alpha: 0.5)
@@ -692,7 +885,7 @@ class _CandlestickPainter extends CustomPainter {
     final dateGridPaint = Paint()
       ..color = AppColors.slate800.withValues(alpha: 0.35)
       ..strokeWidth = 1;
-    for (var i = 0; i < candles.length; i += labelEvery) {
+    for (var i = 0; i < candles.length + forecastPrices.length; i += labelEvery) {
       final x = i * slotWidth;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), dateGridPaint);
     }
@@ -732,6 +925,7 @@ class _CandlestickPainter extends CustomPainter {
     _drawOverlayLine(canvas, size, sma, AppColors.amber500);
     _drawOverlayLine(canvas, size, ema, AppColors.cyan500);
     _drawPaddingLabel(canvas, size);
+    _drawForecastLine(canvas, size);
 
     if (highlightIndex != null) {
       final idx = highlightIndex!.clamp(0, candles.length - 1);
@@ -768,7 +962,10 @@ class _CandlestickPainter extends CustomPainter {
         oldDelegate.sma != sma ||
         oldDelegate.ema != ema ||
         oldDelegate.highlightIndex != highlightIndex ||
-        oldDelegate.paddingCandleCount != paddingCandleCount;
+        oldDelegate.paddingCandleCount != paddingCandleCount ||
+        oldDelegate.forecastPrices != forecastPrices ||
+        oldDelegate.forecastLabel != forecastLabel ||
+        oldDelegate.forecastColor != forecastColor;
   }
 }
 
