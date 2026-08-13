@@ -423,6 +423,7 @@ class _RootShellState extends State<RootShell> {
         return TrackingScreen(
           requestedSymbol: _trackRequestSymbol,
           requestId: _trackRequestId,
+          favorites: _favorites,
         );
       case 'technical':
         return TechnicalScreen(favorites: _favorites);

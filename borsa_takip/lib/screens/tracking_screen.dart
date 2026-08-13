@@ -10,6 +10,8 @@ import '../widgets/bento_kpi_row.dart';
 import '../widgets/candlestick_chart.dart';
 import '../widgets/chart_result_section.dart';
 import '../widgets/glass_card.dart';
+import '../widgets/signal_quadrant_tile.dart';
+import '../widgets/watchlist_tile.dart';
 
 // bkz. home_screen.dart'taki aynı isimli sabitin doc yorumu — burada
 // TrackingScreen'in kendi "chrome"u: sayfa padding'i (16×2) + bu ekranın
@@ -18,6 +20,11 @@ import '../widgets/glass_card.dart';
 // CandlestickChart'ın kendi GlassCard'ı (12×2) + fiyat ekseni.
 const _chartChromeWidth = 32 + 48 + 24;
 
+// HomeScreen'deki aynı isimli sabitlerin doc yorumu geçerli — bento
+// düzeninin satır/sütun geçiş eşiği ve hero/sidebar arası boşluk.
+const _bentoBreakpoint = 900.0;
+const _bentoGap = 24.0;
+
 class TrackingScreen extends StatefulWidget {
   // Favoriler sekmesinden takip ikonuna basılınca RootShell bu ikisini
   // birlikte günceller; requestId aynı sembol için bile her tıklamada
@@ -25,8 +32,19 @@ class TrackingScreen extends StatefulWidget {
   // (bkz. HomeScreen'deki bildirim->grafik deseni, home_screen.dart).
   final MarketSymbol? requestedSymbol;
   final int requestId;
+  // Bento sidebar'ındaki WatchlistTile için — HomeScreen'in aynı prop'uyla
+  // aynı tek liste (bkz. main.dart RootShell._favorites). Burada
+  // onToggleFavorite YOK: HomeScreen'deki yıldız butonu seçili sembolü
+  // favorilere ekleyip çıkarmak için, Takip'in kendi böyle bir aksiyonu yok
+  // (TechnicalScreen'in salt-okunur FavoriteSymbolsBar'ıyla aynı gerekçe).
+  final List<String> favorites;
 
-  const TrackingScreen({super.key, this.requestedSymbol, this.requestId = 0});
+  const TrackingScreen({
+    super.key,
+    this.requestedSymbol,
+    this.requestId = 0,
+    this.favorites = const [],
+  });
 
   @override
   State<TrackingScreen> createState() => _TrackingScreenState();
@@ -49,7 +67,12 @@ class _TrackingScreenState extends State<TrackingScreen> {
   int _handledRequestId = 0;
 
   int _estimateMinCandles(BuildContext context) {
-    final available = MediaQuery.sizeOf(context).width - _chartChromeWidth;
+    final totalWidth = MediaQuery.sizeOf(context).width;
+    // HomeScreen'deki aynı düzeltmenin doc yorumu — hero sütunu geniş
+    // ekranlarda toplam genişliğin tamamı değil sadece 8/12'si.
+    final heroWidth =
+        totalWidth >= _bentoBreakpoint ? (totalWidth - _bentoGap) * 8 / 12 : totalWidth;
+    final available = heroWidth - _chartChromeWidth;
     return (available / CandlestickChart.maxSlotWidth).ceil().clamp(8, 60);
   }
 
@@ -186,8 +209,80 @@ class _TrackingScreenState extends State<TrackingScreen> {
     }
   }
 
+  // Bento sidebar'ındaki WatchlistTile'a tıklamak — Favoriler'deki takip
+  // ikonuyla aynı sonuca varır (seçili sembolü değiştir, kalıcı kaydet,
+  // getir), ama burada RootShell'in requestId/requestedSymbol köprüsünden
+  // geçmeden doğrudan yapılabiliyor çünkü bu widget'ın kendi içinde.
+  void _selectSymbol(String symbol) {
+    setState(() => _selectedSymbol = MarketSymbol(symbol: symbol, name: symbol));
+    _api.setTrackedSymbol(symbol).catchError((e) {
+      debugPrint('Takip edilen sembol kaydedilemedi: $e');
+    });
+    _fetch();
+  }
+
   @override
   Widget build(BuildContext context) {
+    // HomeScreen'in "Zaman Aralığı" kartıyla aynı çerçeveleme — önceden
+    // burada ChartResultSection çıplak duruyordu, iki sekme arasında
+    // tutarsız bir görünüme yol açıyordu.
+    final heroColumn = GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                _selectedSymbol == null
+                    ? 'Henüz takip edilen bir sembol yok.'
+                    : 'Takip edilen: ${_selectedSymbol!.symbol}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ChartResultSection(
+            intervals: ChartInterval.tracking,
+            selectedInterval: _interval,
+            onSelectInterval: _selectInterval,
+            dateRange: _dateRange,
+            dateFormat: _dateFormat,
+            onPickDateRange: _pickDateRange,
+            fetchLabel: 'Yenile',
+            fetchIcon: Icons.refresh,
+            onFetch: _selectedSymbol == null || _loading ? null : _fetch,
+            loading: _loading,
+            error: _error,
+            result: _result,
+            paddingCandleCount: _paddingCandleCount,
+            resultHeader: _result == null || _result!.candles.isEmpty
+                ? null
+                : BentoKpiRow(result: _result!),
+          ),
+        ],
+      ),
+    );
+
+    // HomeScreen'in aynı sidebar'ıyla aynı gerekçe (bkz. home_screen.dart) —
+    // favoriler listesi ve seçili sembol her zaman elde olduğundan grafik
+    // daha getirilmeden önce de kendi verisini gösterebilir.
+    final sidebarColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        WatchlistTile(
+          favorites: widget.favorites,
+          api: _api,
+          selectedSymbol: _selectedSymbol?.symbol,
+          onSelect: _selectSymbol,
+        ),
+        const SizedBox(height: 24),
+        SignalQuadrantTile(api: _api, symbol: _selectedSymbol?.symbol),
+      ],
+    );
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -205,47 +300,27 @@ class _TrackingScreenState extends State<TrackingScreen> {
           if (_loadingPersisted)
             const Center(child: CircularProgressIndicator())
           else
-            // HomeScreen'in "Zaman Aralığı" kartıyla aynı çerçeveleme —
-            // önceden burada ChartResultSection çıplak duruyordu, iki
-            // sekme arasında tutarsız bir görünüme yol açıyordu.
-            GlassCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= _bentoBreakpoint) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _selectedSymbol == null
-                            ? 'Henüz takip edilen bir sembol yok.'
-                            : 'Takip edilen: ${_selectedSymbol!.symbol}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
+                      Expanded(flex: 8, child: heroColumn),
+                      const SizedBox(width: _bentoGap),
+                      Expanded(flex: 4, child: sidebarColumn),
                     ],
-                  ),
-                  const SizedBox(height: 16),
-                  ChartResultSection(
-                    intervals: ChartInterval.tracking,
-                    selectedInterval: _interval,
-                    onSelectInterval: _selectInterval,
-                    dateRange: _dateRange,
-                    dateFormat: _dateFormat,
-                    onPickDateRange: _pickDateRange,
-                    fetchLabel: 'Yenile',
-                    fetchIcon: Icons.refresh,
-                    onFetch: _selectedSymbol == null || _loading ? null : _fetch,
-                    loading: _loading,
-                    error: _error,
-                    result: _result,
-                    paddingCandleCount: _paddingCandleCount,
-                    resultHeader: _result == null || _result!.candles.isEmpty
-                        ? null
-                        : BentoKpiRow(result: _result!),
-                  ),
-                ],
-              ),
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    heroColumn,
+                    const SizedBox(height: _bentoGap),
+                    sidebarColumn,
+                  ],
+                );
+              },
             ),
         ],
       ),
