@@ -497,6 +497,12 @@ const _scorePageSize = 50;
 /// sayfalar halinde döner. Puanı henüz hesaplanmamış semboller (ör. arka
 /// plan taraması henüz oraya ulaşmadı) `pendingCount` ile ayrıca bildirilir,
 /// listede görünmez.
+///
+/// `symbols` (virgülle ayrılmış) parametresi verilirse, watchlist/kategori/
+/// sayfalama mantığı tamamen atlanır — bildirim akışındaki kartlar için,
+/// watchlist'in ilgisiz kısmını taramadan sadece o belirli sembollerin
+/// puanını döndürür (bkz. NotificationsScreen'in `getTechnicalScoresFor`
+/// çağrısı).
 Future<Response> _technicalScoresHandler(
   Request request,
   String userId,
@@ -504,6 +510,20 @@ Future<Response> _technicalScoresHandler(
   TechnicalScoreCache scoreCache,
 ) async {
   final params = request.url.queryParameters;
+  final symbolsParam = params['symbols'];
+  if (symbolsParam != null && symbolsParam.trim().isNotEmpty) {
+    final symbols = symbolsParam.split(',').map((s) => s.trim()).toSet();
+    final scored = scoreCache.scoresFor(symbols);
+    return _json({
+      'items': scored.map((s) => s.toJson()).toList(),
+      'page': 1,
+      'totalPages': 1,
+      'total': scored.length,
+      'pendingCount': symbols.length - scored.length,
+      'refreshing': scoreCache.isRefreshing,
+    });
+  }
+
   final categoriesParam = params['categories'];
   final categories = (categoriesParam == null || categoriesParam.trim().isEmpty)
       ? {'bist', 'us', 'crypto'}

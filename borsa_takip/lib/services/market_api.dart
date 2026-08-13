@@ -196,6 +196,31 @@ class MarketApi {
     return ScoredSymbolPage.fromJson(resp);
   }
 
+  /// Bildirimler akışındaki kartlar için: belirli sembollerin (watchlist'in
+  /// tamamı değil, sadece o an gösterilen bildirim sayfasındakiler)
+  /// önbelleklenmiş puanını sıralama/sayfalama yapılmadan döner — aynı
+  /// `/api/technical-scores` endpoint'i, `symbols` filtresiyle (bkz.
+  /// proxy_server `_technicalScoresHandler`). Boş [symbols] için isteğe
+  /// gerek yok.
+  Future<ScoredSymbolPage> getTechnicalScoresFor(Iterable<String> symbols) async {
+    final unique = symbols.toSet();
+    if (unique.isEmpty) {
+      return const ScoredSymbolPage(
+        items: [],
+        page: 1,
+        totalPages: 1,
+        total: 0,
+        pendingCount: 0,
+        refreshing: false,
+      );
+    }
+    final uri = Uri.parse('$_baseUrl/api/technical-scores').replace(
+      queryParameters: {'symbols': unique.join(',')},
+    );
+    final resp = await _get(uri);
+    return ScoredSymbolPage.fromJson(resp);
+  }
+
   /// Puan önbelleğinin arka planda yenilenmesini tetikler; sonucu beklemeden
   /// döner (izleme listesi büyükse dakikalar sürebilir, bkz. `checkNow`).
   Future<bool> refreshTechnicalScores() async {

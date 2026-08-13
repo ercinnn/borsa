@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../models/notification_item.dart';
 import '../models/symbol.dart';
 import '../services/market_api.dart';
 import '../theme/app_colors.dart';
+import '../utils/score_color.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/score_ranking_section.dart';
 import '../widgets/symbol_search_field.dart';
@@ -32,6 +34,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   List<String> _watchlist = [];
   NotificationPage? _notificationPage;
   int _page = 1;
+
+  // Bildirim kartlarında gösterilen Teknik puan (X/100) rozeti için —
+  // sadece o an sayfada görünen bildirimlerin sembollerine göre doldurulur,
+  // bkz. _loadScoresForCurrentPage.
+  Map<String, int> _scores = {};
 
   bool _loadingWatchlist = true;
   bool _loadingNotifications = true;
@@ -146,12 +153,33 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         _page = result.page;
         _loadingNotifications = false;
       });
+      _loadScoresForCurrentPage();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loadingNotifications = false;
       });
+    }
+  }
+
+  // En iyi çaba (best-effort): puan önbelleği henüz doldurulmamışsa ya da
+  // istek başarısız olursa rozetler sessizce gösterilmez — bu, bildirim
+  // akışının kendisini kırmamalı, bu yüzden _error'a yazmıyor.
+  Future<void> _loadScoresForCurrentPage() async {
+    final symbols =
+        (_notificationPage?.notifications ?? const <NotificationItem>[])
+            .map((n) => n.symbol)
+            .toSet();
+    if (symbols.isEmpty) return;
+    try {
+      final result = await _api.getTechnicalScoresFor(symbols);
+      if (!mounted) return;
+      setState(() {
+        _scores = {for (final s in result.items) s.symbol: s.score};
+      });
+    } catch (_) {
+      // Rozet olmadan devam et.
     }
   }
 
@@ -398,6 +426,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             for (final n in _notificationPage!.notifications)
               _NotificationTile(
                 item: n,
+                score: _scores[n.symbol],
                 onTap: widget.onOpenChart == null
                     ? null
                     : () => widget.onOpenChart!(
@@ -503,12 +532,14 @@ class _WatchlistSymbolChip extends StatelessWidget {
 
 class _NotificationTile extends StatelessWidget {
   final NotificationItem item;
+  final int? score;
   final VoidCallback? onTap;
   final bool isFavorite;
   final VoidCallback? onToggleFavorite;
 
   const _NotificationTile({
     required this.item,
+    this.score,
     this.onTap,
     this.isFavorite = false,
     this.onToggleFavorite,
@@ -543,6 +574,7 @@ class _NotificationTile extends StatelessWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (score != null && !_isScoreChange) _ScoreBadge(score: score!),
               IconButton(
                 icon: Icon(
                   isFavorite ? Icons.star : Icons.star_border,
@@ -557,6 +589,38 @@ class _NotificationTile extends StatelessWidget {
           ),
           onTap: onTap,
         ),
+      ),
+    );
+  }
+}
+
+/// Bildirim kartında sembolün Teknik sekmesindeki alım puanı (0-100),
+/// `score_ranking_section.dart`'taki `_ScoredSymbolTile` rozetiyle aynı
+/// renk dili (`scoreColor()`) ama trailing satırına sığacak kompakt boyutta
+/// — kademe adı burada tekrar yazılmıyor, renk zaten kademeyi taşıyor.
+class _ScoreBadge extends StatelessWidget {
+  final int score;
+  const _ScoreBadge({required this.score});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = scoreColor(score);
+    final glow = scoreGlows(score);
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.slate900.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+        boxShadow: glow
+            ? [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 10)]
+            : null,
+      ),
+      child: Text(
+        '$score/100',
+        style: GoogleFonts.robotoMono(
+            color: color, fontWeight: FontWeight.w800, fontSize: 12),
       ),
     );
   }
