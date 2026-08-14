@@ -74,6 +74,12 @@ class _CandlestickChartState extends State<CandlestickChart> {
   // pozisyonunu değil, o mumun index'ini tutuyoruz) — hem web'de fare hover'ı
   // hem dokunmatikte sürükleme aynı tek state'i günceller.
   int? _hoverIndex;
+  // Olasılık Isı Konisi'nin hangi renk katmanının üzerinde fare gezindiği
+  // (bkz. _updateForecastHover) — dolu olduğunda price paneli üzerinde
+  // [_ForecastBandTooltip] açılır. [_forecastHoverLocal], tooltip'i imlecin
+  // yanına konumlandırmak için ham hover pozisyonunu tutar.
+  int? _forecastHoverBand;
+  Offset? _forecastHoverLocal;
   bool _showIndicators = true;
   double _minPrice = 0;
   double _maxPrice = 0;
@@ -115,6 +121,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
     // kalacağından kapatılıyor.
     if (resultChanged) {
       _hoverIndex = null;
+    }
+    if (forecastChanged) {
+      _forecastHoverBand = null;
+      _forecastHoverLocal = null;
     }
     if (resultChanged || forecastChanged || patternMatchChanged) {
       _computeRanges();
@@ -215,6 +225,51 @@ class _CandlestickChartState extends State<CandlestickChart> {
     // bölgedeki tıklamaları "viewport'u ortala" olarak ele alması.
     if (idx < 0 || idx >= candleCount) return;
     if (idx != _hoverIndex) setState(() => _hoverIndex = idx);
+  }
+
+  /// [localPosition] koni bölgesinin (bugünün sağı) fiyat paneli içinde mi
+  /// düşüyor kontrol eder; öyleyse o x/y'deki [ProbabilityFan] yüzdelik
+  /// dilim sınırlarıyla karşılaştırarak hangi renk katmanının (0=Koyu
+  /// Kırmızı .. 4=Açık Yeşil) üzerinde olunduğunu bulur — bkz.
+  /// [probabilityFanBands] sıralaması. Koni yoksa (Trend, ya da tahmin
+  /// kapalıyken) ya da imleç fiyat panelinin dışındaysa/koni ufkunun
+  /// dışındaysa tooltip kapatılır.
+  void _updateForecastHover(Offset localPosition, double slotWidth) {
+    final fan = widget.forecast?.fan;
+    final historicalCount = widget.result.candles.length;
+    final idx = (localPosition.dx / slotWidth).floor() - historicalCount;
+    final inPricePanel = localPosition.dy >= 0 && localPosition.dy <= _chartHeight;
+    if (fan == null || fan.isEmpty || !inPricePanel || idx < 0 || idx >= fan.p0.length) {
+      if (_forecastHoverBand != null) {
+        setState(() {
+          _forecastHoverBand = null;
+          _forecastHoverLocal = null;
+        });
+      }
+      return;
+    }
+    final range = _maxPrice - _minPrice;
+    final price = range == 0
+        ? _minPrice
+        : _maxPrice - (localPosition.dy / _chartHeight) * range;
+    final int band;
+    if (price <= fan.p10[idx]) {
+      band = 0;
+    } else if (price <= fan.p30[idx]) {
+      band = 1;
+    } else if (price <= fan.p40[idx]) {
+      band = 2;
+    } else if (price <= fan.p60[idx]) {
+      band = 3;
+    } else {
+      band = 4;
+    }
+    if (band != _forecastHoverBand || localPosition != _forecastHoverLocal) {
+      setState(() {
+        _forecastHoverBand = band;
+        _forecastHoverLocal = localPosition;
+      });
+    }
   }
 
   /// Tahmin bölgesine (kesikli çizginin üzerine ya da altına) yapılan bir
@@ -382,8 +437,10 @@ class _CandlestickChartState extends State<CandlestickChart> {
                     _lastSlotWidth = slotWidth;
                     _lastHistoricalCount = candles.length;
 
-                    void handlePointer(Offset local) =>
-                        _updateHover(local, slotWidth, candles.length);
+                    void handlePointer(Offset local) {
+                      _updateHover(local, slotWidth, candles.length);
+                      _updateForecastHover(local, slotWidth);
+                    }
 
                     return SingleChildScrollView(
                       controller: _scrollController,
@@ -393,13 +450,20 @@ class _CandlestickChartState extends State<CandlestickChart> {
                         child: MouseRegion(
                           cursor: SystemMouseCursors.precise,
                           onHover: (e) => handlePointer(e.localPosition),
-                          onExit: (_) => setState(() => _hoverIndex = null),
+                          onExit: (_) => setState(() {
+                            _hoverIndex = null;
+                            _forecastHoverBand = null;
+                            _forecastHoverLocal = null;
+                          }),
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTapUp: (d) => _handleTap(d.localPosition, slotWidth),
                             onPanDown: (d) => handlePointer(d.localPosition),
                             onPanUpdate: (d) => handlePointer(d.localPosition),
-                            child: Column(
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Column(
                               children: [
                                 SizedBox(
                                   height: _chartHeight,
@@ -487,6 +551,14 @@ class _CandlestickChartState extends State<CandlestickChart> {
                                   ),
                                 ),
                               ],
+                                ),
+                                if (_forecastHoverBand != null && _forecastHoverLocal != null)
+                                  _ForecastBandTooltip(
+                                    band: probabilityFanBands[_forecastHoverBand!],
+                                    position: _forecastHoverLocal!,
+                                    contentWidth: contentWidth,
+                                  ),
+                              ],
                             ),
                           ),
                         ),
@@ -556,6 +628,82 @@ class _LegendDot extends StatelessWidget {
         const SizedBox(width: 4),
         Text(label, style: TextStyle(fontSize: 10, color: AppColors.slate400)),
       ],
+    );
+  }
+}
+
+/// Olasılık Isı Konisi'nin üzerinde fare gezdirildiğinde imlecin yanında
+/// açılan mini bilgi kartı — hangi renk katmanının üzerinde durulduğuna
+/// göre [ProbabilityFanBand.label]/[commentary] gösterir (bkz.
+/// _CandlestickChartState._updateForecastHover, utils/forecast_color.dart).
+/// [position], MouseRegion ile aynı koordinat uzayındaki (Stack'in kendisi)
+/// ham hover noktası; [contentWidth] tooltip'in yatayda kaydırılabilir
+/// alanın dışına taşmasını önlemek için kullanılıyor. `IgnorePointer`
+/// sarmalı, tooltip'in kendisinin hover/tıklama olaylarını yutmasını
+/// engeller — aksi halde imleç tooltip'in üzerine geldiğinde crosshair
+/// takılabilirdi.
+class _ForecastBandTooltip extends StatelessWidget {
+  final ProbabilityFanBand band;
+  final Offset position;
+  final double contentWidth;
+
+  static const _width = 230.0;
+
+  const _ForecastBandTooltip({
+    required this.band,
+    required this.position,
+    required this.contentWidth,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxLeft = (contentWidth - _width).clamp(0.0, contentWidth);
+    final left = (position.dx + 14).clamp(0.0, maxLeft);
+    final top = (position.dy - 8).clamp(0.0, double.infinity);
+    return Positioned(
+      left: left,
+      top: top,
+      child: IgnorePointer(
+        child: Container(
+          width: _width,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppColors.slate950.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: band.color.withValues(alpha: 0.7)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 12),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(color: band.color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      band.label,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.slate100),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                band.commentary,
+                style: TextStyle(fontSize: 10.5, color: AppColors.slate400, height: 1.3),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

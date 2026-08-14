@@ -629,17 +629,20 @@ the tile's available width shrank (see the hero/sidebar split below), since
 a width-locked aspect ratio also shrinks the height regardless of how much
 vertical room the label/value/subtitle text actually needs.
 
-Grafik (`HomeScreen`) additionally lays its content out as a true bento
-grid, not just the KPI strip: a `LayoutBuilder` at ≥900px width puts the
-"Zaman Aralığı" card (interval chips, `BentoKpiRow`, `CandlestickChart`,
-`CandleTable`) in an `Expanded(flex: 8)` hero column beside a
-`flex: 4` sidebar column (stacked into one `Column` below 900px instead),
-containing two more self-fetching tiles: `WatchlistTile`
-(`widgets/watchlist_tile.dart`) shows up to 6 of the user's Favoriler
-symbols with live last price, day-over-day % change, and a small
-`CustomPainter` sparkline (own `/api/candles` call per symbol, last 30
-days, capped at 6 to bound the request burst — tapping a row calls the same
-`_selectSymbol` the search field/favorite bar use), and `SignalQuadrantTile`
+Grafik (`HomeScreen`) and Takip (`TrackingScreen`) both additionally lay
+their content out as a true bento grid, not just the KPI strip: a
+`LayoutBuilder` at ≥900px width puts the "Zaman Aralığı"/"Takip edilen"
+card (interval chips, `BentoKpiRow`, `CandlestickChart`, `CandleTable`) in
+an `Expanded(flex: 8)` hero column beside a `flex: 4` sidebar column
+(stacked into one `Column` below 900px instead), containing two more
+self-fetching tiles: `WatchlistTile` (`widgets/watchlist_tile.dart`) shows
+up to 6 of the user's Favoriler symbols with live last price, day-over-day
+% change, and a small `CustomPainter` sparkline (own `/api/candles` call
+per symbol, last 30 days, capped at 6 to bound the request burst — tapping
+a row selects that symbol: `HomeScreen`'s `_selectSymbol` just swaps the
+hero chart, `TrackingScreen`'s additionally persists it via
+`/api/tracked` and re-fetches, matching what tapping a Favoriler track
+icon already does), and `SignalQuadrantTile`
 (`widgets/signal_quadrant_tile.dart`) shows the *currently selected*
 symbol's `/api/technical` overall Güçlü Al..Güçlü Sat badge + score plus
 RSI(14)/MACD(12,26)/STOCH(9,6) %K rows (matched by `IndicatorRow.name`,
@@ -648,20 +651,25 @@ Architecture above; Bollinger Bands were part of an early draft of this
 tile but dropped since the backend doesn't compute them and adding a new
 indicator was out of scope for this pass). Both tiles fetch independently
 of the hero chart (favorites/selected-symbol are already known before
-"Getir" is even pressed) and re-fetch on `didUpdateWidget` when their
-inputs change, the same self-contained-fetch pattern as `TechnicalScreen`'s
-own widgets. `estimateMinCandles` accounts for the narrower hero column on
-wide screens (8/12 of the page width minus the sidebar gap, not the full
-page) so the auto-history-padding threshold (bkz. above) doesn't
-overestimate how many candles are needed and pad unnecessarily. An earlier
-draft of this layout also included Order Book/Piyasa Derinliği and Temel
-Rasyolar (F/K, PD/DD, FD/FAVÖK, ROE, Net Borç/FAVÖK) tiles per an initial
-spec; both were dropped before implementation — the former would have
-needed fabricated data (Yahoo's chart endpoint has no order-book depth),
-the latter would have revived a fragile Yahoo cookie+crumb dependency
-(bkz. `yahoo_fundamentals.dart` in Architecture above) for a tab
-(Grafik) that has never needed it, and the existing Temel Analiz tab
-already covers that ground.
+"Getir"/"Yenile" is even pressed) and re-fetch on `didUpdateWidget` when
+their inputs change, the same self-contained-fetch pattern as
+`TechnicalScreen`'s own widgets. Each screen's `_estimateMinCandles`
+accounts for the narrower hero column on wide screens (8/12 of the page
+width minus the sidebar gap, not the full page) so the auto-history-padding
+threshold (bkz. above) doesn't overestimate how many candles are needed and
+pad unnecessarily. `TrackingScreen` receives the same `favorites` list
+`HomeScreen` does (bkz. `RootShell._favorites` in main.dart) but no
+`onToggleFavorite` — neither screen's `WatchlistTile` needs it, favoriting
+itself only ever happens from `HomeScreen`/`NotificationsScreen`/
+`FavoritesScreen` (bkz. below). This bento treatment was built on Grafik
+first and rolled out to Takip once approved — an earlier draft also
+included Order Book/Piyasa Derinliği and Temel Rasyolar (F/K, PD/DD,
+FD/FAVÖK, ROE, Net Borç/FAVÖK) tiles per an initial spec; both were
+dropped before implementation — the former would have needed fabricated
+data (Yahoo's chart endpoint has no order-book depth), the latter would
+have revived a fragile Yahoo cookie+crumb dependency (bkz.
+`yahoo_fundamentals.dart` in Architecture above) for tabs that have never
+needed it, and the existing Temel Analiz tab already covers that ground.
 
 `formatCompact()` (K/M/B suffixes, e.g. `2.4M`) moved from a
 `candlestick_chart.dart`-private function to `utils/price_format.dart` so
