@@ -569,6 +569,50 @@ a colored `X/100` score with no textual Al/Sat tier — now also prints
 `SummarySignal.forScore(score).label` beneath it, thresholds copied from
 `summarySignalForScore()` in the backend's `technical_analysis.dart`).
 
+Grafik sekmesindeki "Tahmin: GBM/OU/Trend" `ChoiceChip` üçlüsü
+(`HomeScreen._toggleForecast`; her birinin yanındaki "i" ikonu →
+`_showForecastInfoDialog`, modeli sıradan dille anlatan ayrı bir bilgi
+diyaloğu, seçimi değiştirmez) `utils/forecast_engine.dart`'taki üç
+fonksiyona karşılık gelir: `gbmForecastFan`/`ouForecastFan` (GBM: log-getiri
+kalibrasyonuyla geometrik Brownian hareketi; OU: κ/θ/σ'yı basit doğrusal
+regresyonla kalibre eden ortalamaya-dönüş modeli — ikisi de 1000 bağımsız
+Monte Carlo patikası simüle edip `_reduceDayValues()` ile gün-gün
+p0/p10/p30/p40/p60/p100 yüzdelik dilimlerine indirger, bkz.
+`models/forecast.dart` `ProbabilityFan`) ve `trendForecast` (Holt'un
+deterministik çift-üstel düzleştirmesi — stokastik değil, tek bir
+projeksiyon çizgisi). Butona her basışta rastgelelik yeniden tohumlanır
+(aynı butona ikinci basış tahmini kapatır, üçüncüsü yeni bir senaryo seti
+üretir). Sonuç `CandlestickChart`'a `forecast: ForecastResult` olarak akar:
+`forecastPrices` (medyan/tek projeksiyon) her zaman kesikli bir çizgiyle
+çizilir (`_drawForecastLines`); GBM/OU'da ayrıca dolu olan `forecastFan`
+`_paintForecastBackground`'da 5 katmanlı "Olasılık Isı Konisi"ni doldurur
+(`_fillBand`, sabit renk/opaklık paleti `utils/forecast_color.dart`
+`probabilityFanBands`'ta — en alttan en üste Koyu Kırmızı/Açık
+Kırmızı/Gri/Koyu Yeşil/Açık Yeşil). Koninin üzerinde fare gezdirildiğinde
+(`_updateForecastHover`: hover'ın düştüğü fiyat panelindeki piksel,
+`_maxPrice`/`_minPrice` aralığından geri fiyata çevrilip o günün
+p10/p30/p40/p60 sınırlarıyla karşılaştırılarak hangi katmanda olunduğu
+bulunur) imlecin yanında `_ForecastBandTooltip` açılır — her katmanın
+kendi `label`/`commentary`'si var (`ProbabilityFanBand`'a taşınıyor; sadece
+renk değil bir yorum da: "Uç Kötümser Senaryo" ↔ "Nötr Bölge" ↔ "En Olası
+Senaryo" ↔ "İyimser Senaryo", kullanıcı isteğiyle her renk tonu için ayrı
+metin). GBM/OU aktifken grafiğin hemen altında `widgets/
+forecast_report_card.dart`'ın `ForecastReportCard`'ı da görünür — 1000
+patikanın ufuk sonu dağılımından (`ForecastStats`, bkz.
+`forecast_engine.dart` `_computeStats`) türetilen "Beklenen Trend/Kazanma
+Olasılığı/Risk Değerlendirmesi (VaR)/Özet Strateji Yorumu" metinleriyle bir
+"Yapay Zeka / Kantitatif Gelecek Raporu"; Trend modelinde ya da tahmin
+kapalıyken (`fan == null`) hiçbir şey render etmez, çünkü deterministik bir
+projeksiyonun simülasyon dağılımı yok. Ayrı bir buton olan "Tarihsel
+Benzerlik" (`HomeScreen._toggleHistoricalPatternMatch`, `utils/
+pattern_matcher.dart` `findHistoricalPatterns`) GBM/OU/Trend'le aynı anda
+aktif olmaz — ikisi de `CandlestickChart._hasRightExtension`'ın paylaştığı
+tek "sağ uzantı" konseptini kullanır — ve DTW (Dynamic Time Warping) ile
+geçmişte bugünkü desene en çok benzeyen, birbiriyle çakışmayan en fazla 3
+dönemi bulup soluk "hayalet" çizgiler olarak izdüşürür (`ghostSeries`
+parametreleri, koni/dolgu olmadan sadece ince kesikli çizgi — bkz.
+`_drawGhostLines`).
+
 `utils/candle_padding.dart`'s `fetchCandlesWithMinimum()` addresses a real
 usability bug: a narrow date range + coarse interval (e.g. a 2-month range
 with "Aylık"/`1mo`) returns so few candles that `CandlestickChart`'s
