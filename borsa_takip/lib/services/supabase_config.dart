@@ -4,10 +4,10 @@
 // kılınabilir (ör. farklı bir Supabase projesiyle test için).
 const supabaseUrl = String.fromEnvironment(
   'SUPABASE_URL',
-  defaultValue: 'https://riugphrucjbiaomuylqh.supabase.co',
+  defaultValue: 'https://ccaxmemcetlgmofvhhgh.supabase.co',
 );
 
 const supabaseAnonKey = String.fromEnvironment(
   'SUPABASE_ANON_KEY',
-  defaultValue: 'sb_publishable_gqaLnPySeqU-Y_e8_O0zRw_k5_kB9VV',
+  defaultValue: 'sb_publishable_naZNul0A6WAeK4b-bmMIWg_hVKsSzJk',
 );
